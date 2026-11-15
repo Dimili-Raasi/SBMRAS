@@ -1,0 +1,124 @@
+<sb-page-header
+  title="Facility directory"
+  subtitle="Browse verified hospitals and blood banks participating in the SBMRAS network."
+  icon="local_hospital"
+>
+  <button mat-stroked-button type="button" (click)="reload()" aria-label="Refresh facility directory">
+    <mat-icon>refresh</mat-icon> Refresh
+  </button>
+</sb-page-header>
+
+<section class="directory">
+  <form class="directory-filters" [formGroup]="filters" (submit)="$event.preventDefault()">
+    <mat-form-field appearance="outline" subscriptSizing="dynamic" class="search-field">
+      <mat-label>Facility, area or city</mat-label>
+      <mat-icon matPrefix>search</mat-icon>
+      <input matInput formControlName="search" maxlength="100" />
+    </mat-form-field>
+    <mat-form-field appearance="outline" subscriptSizing="dynamic">
+      <mat-label>Facility type</mat-label>
+      <mat-select formControlName="facilityType">
+        <mat-option value="">All facility types</mat-option>
+        <mat-option value="Hospital">Hospitals</mat-option>
+        <mat-option value="BloodBank">Blood banks</mat-option>
+      </mat-select>
+    </mat-form-field>
+    <mat-form-field appearance="outline" subscriptSizing="dynamic">
+      <mat-label>Area</mat-label>
+      <mat-select formControlName="areaId">
+        <mat-option [value]="null">All areas</mat-option>
+        @for (area of areas(); track area.areaId) {
+          <mat-option [value]="area.areaId">{{ area.name }} · {{ area.city }}</mat-option>
+        }
+      </mat-select>
+    </mat-form-field>
+    @if (hasFilters()) {
+      <button mat-button type="button" (click)="clearFilters()"><mat-icon>filter_alt_off</mat-icon> Clear</button>
+    }
+  </form>
+
+  @switch (state()) {
+    @case ('loading') {
+      <sb-state-panel state="loading" message="Loading verified facilities…" />
+    }
+    @case ('error') {
+      <sb-state-panel state="error" [message]="error()" (retry)="reload()" />
+    }
+    @case ('empty') {
+      <sb-state-panel
+        state="empty"
+        [message]="hasFilters() ? 'No verified facilities match these filters.' : 'No verified facilities are listed yet.'"
+      />
+    }
+    @default {
+      <div class="directory-summary" aria-live="polite">
+        <p><strong>{{ total() }}</strong> verified facilities</p>
+        <span>Only active, verified facilities are shown.</span>
+      </div>
+      <div class="facility-grid" aria-label="Verified facilities">
+        @for (facility of items(); track facility.facilityId) {
+          <article class="facility-card">
+            <header class="facility-card__header">
+              <span class="facility-icon">
+                <mat-icon>{{ facility.facilityType === 'BloodBank' ? 'bloodtype' : 'local_hospital' }}</mat-icon>
+              </span>
+              <div class="facility-title">
+                <p class="facility-type">{{ facility.facilityType === 'BloodBank' ? 'Blood bank' : 'Hospital' }}</p>
+                <h2>{{ facility.name || 'Facility not reported' }}</h2>
+                <span class="facility-code">{{ facility.facilityCode || 'Code not reported' }}</span>
+              </div>
+              <span class="verified"><mat-icon>verified</mat-icon> Verified</span>
+            </header>
+            <div class="facility-address">
+              <mat-icon>location_on</mat-icon>
+              <div>
+                <p>{{ facility.addressLine || 'Address not reported' }}</p>
+                <span>{{ facility.areaName || 'Area not reported' }}@if (facility.city) { · {{ facility.city }} }</span>
+              </div>
+            </div>
+            <div class="facility-meta">
+              <div class="quality-block">
+                <span>Data quality</span>
+                @if (facility.qualityScore !== null && facility.qualityScore !== undefined) {
+                  <sb-quality-gauge [score]="facility.qualityScore" />
+                } @else {
+                  <strong class="unknown">Not reported</strong>
+                }
+              </div>
+              <div class="updated-block">
+                <span>Availability update</span>
+                @if (facility.lastUpdateAt) {
+                  <strong>{{ facility.lastUpdateAt | sbRelative }}</strong>
+                } @else {
+                  <strong class="unknown">Not reported</strong>
+                }
+              </div>
+            </div>
+            <footer class="facility-actions">
+              <span class="hours">
+                <mat-icon>{{ facility.is24x7 ? 'schedule' : 'schedule' }}</mat-icon>
+                {{ facility.is24x7 ? 'Open 24/7' : 'Hours not reported' }}
+              </span>
+              @if (facility.contactPhone || facility.contactEmail) {
+                <button mat-stroked-button color="primary" type="button" (click)="contact(facility)">
+                  <mat-icon>{{ facility.contactPhone ? 'call' : 'mail' }}</mat-icon>
+                  Contact facility
+                </button>
+              } @else {
+                <span class="unknown">Contact not reported</span>
+              }
+            </footer>
+          </article>
+        }
+      </div>
+      <mat-paginator
+        [length]="total()"
+        [pageIndex]="page() - 1"
+        [pageSize]="pageSize()"
+        [pageSizeOptions]="[12, 24, 48]"
+        (page)="onPage($event)"
+        aria-label="Facility directory pages"
+      />
+    }
+  }
+</section>

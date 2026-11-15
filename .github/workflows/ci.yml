@@ -1,0 +1,192 @@
+name: SBMRAS CI
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+      - feature/**
+  pull_request:
+    branches:
+      - main
+      - develop
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  api:
+    name: API (.NET build, test, publish)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DOTNET_NOLOGO: "true"
+      DOTNET_CLI_TELEMETRY_OPTOUT: "true"
+      # SQL integration tests run only when this secret is set (catalog must end with "_Test"); otherwise they are skipped.
+      SBMRAS_TEST_CONNECTION: ${{ secrets.SBMRAS_TEST_CONNECTION }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Verify API sources are tracked
+        shell: bash
+        run: |
+          missing=0
+          for f in SBMRAS.API.slnx SBMRAS.API/SBMRAS.API.csproj SBMRAS.API/Program.cs SBMRAS.API/host.json; do
+            if [ ! -f "$f" ]; then
+              echo "::error file=$f::$f is missing from the checkout."
+              missing=1
+            fi
+          done
+          exit $missing
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore
+        run: dotnet restore SBMRAS.API.slnx
+
+      - name: Test
+        run: >
+          dotnet test SBMRAS.API.slnx
+          --configuration Release
+          --no-restore
+          --logger "trx;LogFileName=sbmras-tests.trx"
+          --results-directory TestResults
+
+      - name: Summarize test results
+        if: ${{ !cancelled() }}
+        shell: pwsh
+        run: |
+          $trx = Get-ChildItem -Path TestResults -Filter *.trx -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $trx) {
+            "### API tests`n`nNo TRX results were produced." >> $env:GITHUB_STEP_SUMMARY
+            exit 0
+          }
+
+          [xml]$doc = Get-Content -LiteralPath $trx.FullName -Raw
+          $ns = @{ t = 'http://microsoft.com/schemas/VisualStudio/TeamTest/2010' }
+          $results = Select-Xml -Xml $doc -XPath '//t:UnitTestResult' -Namespace $ns | ForEach-Object { $_.Node }
+          $isSql = { param($r) $r.testName -like 'SBMRAS.Tests.Integration.*' -or $r.testName -like 'SBMRAS.Tests.*.Integration.*' }
+
+          $sql = @($results | Where-Object { & $isSql $_ })
+          $other = @($results | Where-Object { -not (& $isSql $_) })
+          $sqlSkipped = @($sql | Where-Object outcome -eq 'NotExecuted')
+          $otherSkipped = @($other | Where-Object outcome -eq 'NotExecuted')
+
+          $configured = [bool]$env:SBMRAS_TEST_CONNECTION
+          $lines = @(
+            '### API tests',
+            '',
+            '| Group | Total | Passed | Failed | Skipped |',
+            '|---|---:|---:|---:|---:|',
+            "| Unit / API | $($other.Count) | $(@($other | Where-Object outcome -eq 'Passed').Count) | $(@($other | Where-Object outcome -eq 'Failed').Count) | $($otherSkipped.Count) |",
+            "| SQL integration | $($sql.Count) | $(@($sql | Where-Object outcome -eq 'Passed').Count) | $(@($sql | Where-Object outcome -eq 'Failed').Count) | $($sqlSkipped.Count) |",
+            '',
+            "SBMRAS_TEST_CONNECTION configured: **$configured**"
+          )
+
+          if ($sqlSkipped.Count -gt 0) {
+            $reason = ($sqlSkipped[0].Output.StdOut, $sqlSkipped[0].Output.ErrorInfo.Message | Where-Object { $_ } | Select-Object -First 1)
+            Write-Host "::warning title=SQL integration tests skipped::$($sqlSkipped.Count) SQL integration test(s) skipped. Set the SBMRAS_TEST_CONNECTION secret to run them."
+            $lines += '', "> $($sqlSkipped.Count) SQL integration test(s) were skipped."
+            if ($reason) { $lines += "> Reason: $(($reason -replace '\r?\n', ' ').Trim())" }
+          }
+
+          if ($otherSkipped.Count -gt 0) {
+            $lines += '', '<details><summary>Other skipped tests</summary>', ''
+            $lines += $otherSkipped | ForEach-Object { "- $($_.testName)" }
+            $lines += '', '</details>'
+          }
+
+          $lines -join "`n" >> $env:GITHUB_STEP_SUMMARY
+
+      - name: Upload test results
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: api-test-results
+          path: TestResults/**/*.trx
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Publish API
+        run: dotnet publish SBMRAS.API/SBMRAS.API.csproj --configuration Release --output artifacts/api
+
+      - name: Verify host.json at publish root
+        shell: bash
+        run: |
+          if [ ! -f artifacts/api/host.json ]; then
+            echo "::error::host.json is not at the root of artifacts/api."
+            exit 1
+          fi
+          echo "host.json found at artifacts/api/host.json"
+
+  sql:
+    name: SQL scripts (ordering check)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Check numbered scripts
+        shell: pwsh
+        run: |
+          $root = 'SBMRAS.Infrastructure/SQL'
+          $scripts = @(Get-ChildItem -Path $root -File -Filter '*.sql' | Where-Object Name -match '^\d{2}_.+\.sql$' | Sort-Object Name)
+          if ($scripts.Count -eq 0) { Write-Host "::error::No numbered scripts in $root."; exit 1 }
+          $dupes = @($scripts | Group-Object { $_.Name.Substring(0, 2) } | Where-Object Count -gt 1)
+          if ($dupes.Count -gt 0) { Write-Host "::error::Duplicate script numbers: $(($dupes | ForEach-Object Name) -join ', ')"; exit 1 }
+          $lines = @('### SQL scripts', '', '| Order | Script |', '|---:|---|')
+          $lines += $scripts | ForEach-Object { "| $($_.Name.Substring(0, 2)) | ``$($_.Name)`` |" }
+          $lines -join "`n" >> $env:GITHUB_STEP_SUMMARY
+
+  web:
+    name: Web (Angular test, build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: SBMRAS.Web
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js 24
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: SBMRAS.Web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Test
+        run: npm test -- --watch=false
+
+      - name: Build
+        run: npm run build
+
+      - name: Verify browser output
+        shell: bash
+        run: |
+          if [ ! -f dist/SBMRAS.Web/browser/index.html ]; then
+            echo "::error::SBMRAS.Web/dist/SBMRAS.Web/browser/index.html was not produced."
+            exit 1
+          fi
+          echo "Found SBMRAS.Web/dist/SBMRAS.Web/browser/index.html"

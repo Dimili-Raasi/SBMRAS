@@ -1,0 +1,200 @@
+<div class="sb-dialog-head">
+  <mat-icon class="head-icon">{{ isNew ? 'person_add' : 'manage_accounts' }}</mat-icon>
+  <div class="grow">
+    <h2 mat-dialog-title>{{ isNew ? 'Pre-provision user' : (user()?.displayName || 'User') }}</h2>
+    @if (user(); as u) {
+      <div class="muted small">
+        <span class="mono">#{{ u.userId }}</span> · {{ u.email }} ·
+        <span class="sb-active-pill" [class.off]="!u.isActive">{{ u.isActive ? 'Active' : 'Inactive' }}</span>
+        @if (u.entraLinked) {
+          · <span class="sb-source-badge entra"><mat-icon inline>verified_user</mat-icon> Entra linked</span>
+        }
+        · Last sign-in {{ u.lastLoginAt ? (u.lastLoginAt | date: 'dd MMM yyyy, HH:mm') : 'never' }}
+      </div>
+    } @else if (isNew) {
+      <div class="muted small">The account links automatically when this person first signs in with the same e-mail.</div>
+    }
+  </div>
+  <button mat-icon-button type="button" aria-label="Close" (click)="close()"><mat-icon>close</mat-icon></button>
+</div>
+
+@if (saving()) {
+  <mat-progress-bar mode="indeterminate" />
+}
+
+<mat-dialog-content>
+  @if (loading()) {
+    <sb-state-panel state="loading" message="Loading user…" />
+  } @else if (loadError()) {
+    <sb-state-panel state="error" [message]="loadError()" (retry)="load()" />
+  } @else {
+    <mat-tab-group [selectedIndex]="tab()" (selectedIndexChange)="tab.set($event)" animationDuration="150ms">
+      <mat-tab label="Profile & roles">
+        <form class="sb-form-grid pt-3" [formGroup]="form" (ngSubmit)="save()" novalidate>
+          @if (formError()) {
+            <div class="sb-form-error span-2" role="alert"><mat-icon>error</mat-icon>{{ formError() }}</div>
+          }
+          <mat-form-field appearance="outline" class="span-2">
+            <mat-label>Display name</mat-label>
+            <input matInput formControlName="displayName" required maxlength="150" />
+            @if (form.controls.displayName.hasError('required')) {
+              <mat-error>Display name is required.</mat-error>
+            }
+          </mat-form-field>
+          <mat-form-field appearance="outline">
+            <mat-label>Given name</mat-label>
+            <input matInput formControlName="givenName" maxlength="100" />
+          </mat-form-field>
+          <mat-form-field appearance="outline">
+            <mat-label>Family name</mat-label>
+            <input matInput formControlName="familyName" maxlength="100" />
+          </mat-form-field>
+          <mat-form-field appearance="outline">
+            <mat-label>E-mail</mat-label>
+            <input matInput type="email" formControlName="email" required maxlength="320" />
+            @if (form.controls.email.hasError('required')) {
+              <mat-error>E-mail is required.</mat-error>
+            } @else if (form.controls.email.hasError('email')) {
+              <mat-error>Enter a valid e-mail address.</mat-error>
+            }
+          </mat-form-field>
+          <mat-form-field appearance="outline">
+            <mat-label>Phone</mat-label>
+            <input matInput formControlName="phone" maxlength="30" />
+            @if (form.controls.phone.hasError('pattern')) {
+              <mat-error>Use digits, spaces, +, ( ) or -.</mat-error>
+            }
+          </mat-form-field>
+          <mat-form-field appearance="outline">
+            <mat-label>Organisation</mat-label>
+            <input matInput formControlName="organizationName" maxlength="200" />
+          </mat-form-field>
+          <mat-form-field appearance="outline">
+            <mat-label>Area</mat-label>
+            <mat-select formControlName="areaId">
+              <mat-option [value]="null">Not set</mat-option>
+              @for (a of areas(); track a.areaId) {
+                <mat-option [value]="a.areaId">{{ a.name }} · {{ a.city }}</mat-option>
+              }
+            </mat-select>
+          </mat-form-field>
+
+          <fieldset class="sb-role-fieldset span-2">
+            <legend>Roles</legend>
+            <p class="muted small mb-2">
+              Local roles are admin-assigned fallbacks. Roles sourced from Microsoft Entra groups/app roles are read-only here
+              and are re-synchronised every sign-in.
+            </p>
+            <div class="sb-role-grid">
+              @for (r of roleOptions; track r.code) {
+                <div class="sb-role-option" [class.held]="heldRoles().has(r.code)">
+                  <mat-checkbox
+                    [checked]="isLocal(r.code) || r.code === 'PublicUser'"
+                    [disabled]="roleLocked(r.code)"
+                    (change)="toggleRole(r.code, $event.checked)"
+                  >
+                    <strong>{{ r.name }}</strong>
+                    <span class="muted small d-block">{{ r.hint }}</span>
+                  </mat-checkbox>
+                  <div class="sb-chip-row">
+                    @if (isEntra(r.code)) {
+                      <span class="sb-source-badge entra" matTooltip="Granted by Microsoft Entra; manage it in the Entra group">
+                        <mat-icon inline>cloud</mat-icon> Entra
+                      </span>
+                    }
+                    @if (isLocal(r.code)) {
+                      <span class="sb-source-badge local"><mat-icon inline>badge</mat-icon> Local</span>
+                    }
+                  </div>
+                </div>
+              }
+            </div>
+          </fieldset>
+
+          <div class="sb-dialog-form-actions span-2">
+            @if (!isNew && user(); as u) {
+              <button
+                mat-stroked-button
+                type="button"
+                [class.danger]="u.isActive"
+                [disabled]="saving() || (isSelf() && u.isActive)"
+                [matTooltip]="isSelf() && u.isActive ? 'You cannot deactivate your own account' : ''"
+                (click)="toggleStatus()"
+              >
+                <mat-icon>{{ u.isActive ? 'person_off' : 'person' }}</mat-icon>
+                {{ u.isActive ? 'Deactivate' : 'Activate' }}
+              </button>
+            }
+            <span class="grow"></span>
+            <button mat-flat-button color="primary" type="submit" [disabled]="saving() || (!isNew && form.pristine)">
+              <mat-icon>save</mat-icon>
+              {{ isNew ? 'Create user' : 'Save profile & roles' }}
+            </button>
+          </div>
+        </form>
+      </mat-tab>
+
+      @if (!isNew) {
+        <mat-tab label="Facility assignments ({{ assignments.length }})">
+          <div class="pt-3">
+            <p class="muted small">
+              Facility access is scoped by assignment. Hospitals require the Hospital Management role; blood banks require the
+              Blood Bank role (administrators may hold any). Removing a row end-dates the assignment.
+            </p>
+            @if (facilitiesError()) {
+              <div class="sb-form-error" role="alert"><mat-icon>warning</mat-icon>{{ facilitiesError() }}</div>
+            }
+            @if (assignError()) {
+              <div class="sb-form-error" role="alert"><mat-icon>error</mat-icon>{{ assignError() }}</div>
+            }
+            @if (!assignments.length) {
+              <sb-state-panel state="empty" message="This user is not assigned to any facility." />
+            }
+            @for (row of assignments.controls; track row; let i = $index) {
+              <div class="sb-assign-row" [formGroup]="row">
+                <mat-form-field appearance="outline" class="grow" subscriptSizing="dynamic">
+                  <mat-label>Facility</mat-label>
+                  <mat-select formControlName="facilityId" required>
+                    @for (f of facilityOptionsFor(i); track f.facilityId) {
+                      <mat-option [value]="f.facilityId">
+                        <span class="mono">{{ f.facilityCode }}</span> · {{ f.name }} ({{ f.facilityType === 'BloodBank' ? 'Blood bank' : 'Hospital' }}, {{ f.verificationStatus }})
+                      </mat-option>
+                    }
+                  </mat-select>
+                  @if (roleWarning(row.controls.facilityId.value); as warn) {
+                    <mat-hint class="warn-text">{{ warn }}</mat-hint>
+                  }
+                  @if (row.controls.facilityId.hasError('required')) {
+                    <mat-error>Select a facility.</mat-error>
+                  }
+                </mat-form-field>
+                <mat-form-field appearance="outline" subscriptSizing="dynamic" class="role-col">
+                  <mat-label>Assignment role</mat-label>
+                  <mat-select formControlName="assignmentRole" required>
+                    @for (ar of assignmentRoles; track ar) {
+                      <mat-option [value]="ar">{{ ar }}</mat-option>
+                    }
+                  </mat-select>
+                </mat-form-field>
+                <button mat-icon-button type="button" aria-label="Remove assignment" matTooltip="Remove" (click)="removeAssignment(i)">
+                  <mat-icon>delete</mat-icon>
+                </button>
+              </div>
+            }
+            <div class="sb-dialog-form-actions">
+              <button mat-stroked-button type="button" (click)="addAssignment()" [disabled]="!facilities().length">
+                <mat-icon>add</mat-icon>
+                Add facility
+              </button>
+              <span class="grow"></span>
+              <button mat-flat-button color="primary" type="button" [disabled]="saving() || assignments.pristine" (click)="saveAssignments()">
+                <mat-icon>save</mat-icon>
+                Save assignments
+              </button>
+            </div>
+          </div>
+        </mat-tab>
+      }
+    </mat-tab-group>
+  }
+</mat-dialog-content>

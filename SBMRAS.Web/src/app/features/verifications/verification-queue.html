@@ -1,0 +1,154 @@
+<sb-page-header
+  title="Change Verification"
+  subtitle="Anomalous inventory updates held for a second person's review before they become visible."
+  icon="rule"
+>
+  <button mat-stroked-button type="button" (click)="load()" [disabled]="state() === 'loading'">
+    <mat-icon>refresh</mat-icon>
+    Refresh
+  </button>
+</sb-page-header>
+
+<section class="sb-card filters">
+  <mat-form-field appearance="outline" subscriptSizing="dynamic">
+    <mat-label>Status</mat-label>
+    <mat-select [(ngModel)]="status" (selectionChange)="applyFilters()">
+      <mat-option [value]="null">Any status</mat-option>
+      @for (s of statuses; track s.value) {
+        <mat-option [value]="s.value">{{ s.label }}</mat-option>
+      }
+    </mat-select>
+  </mat-form-field>
+  <mat-form-field appearance="outline" subscriptSizing="dynamic">
+    <mat-label>Facility</mat-label>
+    <mat-select [(ngModel)]="facilityId" (selectionChange)="applyFilters()">
+      <mat-option [value]="null">All my facilities</mat-option>
+      @for (f of facilities(); track f.facilityId) {
+        <mat-option [value]="f.facilityId">{{ f.name }}</mat-option>
+      }
+    </mat-select>
+  </mat-form-field>
+  <mat-form-field appearance="outline" subscriptSizing="dynamic">
+    <mat-label>Inventory</mat-label>
+    <mat-select [(ngModel)]="inventoryKind" (selectionChange)="applyFilters()">
+      <mat-option [value]="null">Blood and resources</mat-option>
+      <mat-option value="Blood">Blood stock</mat-option>
+      <mat-option value="Resource">Medical resources</mat-option>
+    </mat-select>
+  </mat-form-field>
+</section>
+
+@switch (state()) {
+  @case ('loading') {
+    <sb-state-panel state="loading" message="Loading inventory changes…" />
+  }
+  @case ('error') {
+    <sb-state-panel state="error" [message]="error()" (retry)="load()" />
+  }
+  @case ('empty') {
+    <sb-state-panel state="empty" [message]="emptyMessage()" />
+  }
+  @default {
+    <div class="change-list">
+      @for (c of items(); track c.changeId) {
+        <article class="sb-card change" [class.change--pending]="c.status === 'PendingReview'">
+          <header class="change__head">
+            <div>
+              <span class="mono change__no">{{ c.changeNo }}</span>
+              <span [class]="statusClass(c.status)">{{ c.status === 'PendingReview' ? 'Pending review' : c.status }}</span>
+              @for (f of flags(c); track f.code) {
+                <span class="flag" [class.flag--jump]="f.code === 'LARGE_JUMP'" [matTooltip]="f.hint">
+                  <mat-icon inline>{{ f.icon }}</mat-icon>{{ f.label }}
+                </span>
+              }
+            </div>
+            <div class="muted small">
+              {{ c.sourceType || 'Source not reported' }} ·
+              {{ c.submittedAt ? (c.submittedAt | date: 'dd MMM yyyy, HH:mm') : 'Not reported' }}
+              @if (c.submittedByName) { · {{ c.submittedByName }} }
+            </div>
+          </header>
+
+          <div class="change__body">
+            <div class="change__item">
+              <div class="item-label">
+                <mat-icon>{{ c.inventoryKind === 'Blood' ? 'water_drop' : 'medical_services' }}</mat-icon>
+                <span class="mono">{{ c.itemLabel }}</span>
+              </div>
+              <div class="muted small">{{ c.facilityName }}</div>
+              @if (c.validUntil) {
+                <div class="muted small">Valid until {{ c.validUntil | date: 'dd MMM, HH:mm' }}</div>
+              }
+            </div>
+
+            <table class="diff">
+              <thead>
+                <tr><th></th><th>Current</th><th></th><th>Proposed</th><th>Change</th></tr>
+              </thead>
+              <tbody>
+                @for (d of diffs(c); track d.label) {
+                  <tr>
+                    <th>{{ d.label }}</th>
+                    <td class="mono old">{{ d.before }}</td>
+                    <td><mat-icon inline>arrow_forward</mat-icon></td>
+                    <td class="mono new" [class.changed]="d.changed">{{ d.after }}</td>
+                    <td class="mono delta">{{ d.delta ?? '' }}</td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+
+            <div class="change__reason">
+              <div class="muted small">Submitter's reason</div>
+              <div>{{ c.reason || 'No reason given' }}</div>
+              @if (c.decidedAt) {
+                <div class="muted small mt-2">
+                  Decided {{ c.decidedAt | date: 'dd MMM yyyy, HH:mm' }}
+                  @if (c.decidedByName) { by {{ c.decidedByName }} }
+                </div>
+                @if (c.decisionReason) { <div>{{ c.decisionReason }}</div> }
+              }
+            </div>
+          </div>
+
+          @if (c.status === 'PendingReview') {
+            <footer class="change__actions">
+              @if (canDecide(c)) {
+                <button
+                  mat-stroked-button
+                  color="warn"
+                  type="button"
+                  [disabled]="busyId() === c.changeId"
+                  (click)="decide(c, 'Reject')"
+                >
+                  <mat-icon>block</mat-icon> Reject
+                </button>
+                <button
+                  mat-flat-button
+                  color="primary"
+                  type="button"
+                  [disabled]="busyId() === c.changeId"
+                  (click)="decide(c, 'Approve')"
+                >
+                  <mat-icon>verified</mat-icon> Approve &amp; apply
+                </button>
+              } @else {
+                <span class="muted small">
+                  <mat-icon inline>lock</mat-icon>
+                  A different verifier must decide this change.
+                </span>
+              }
+            </footer>
+          }
+        </article>
+      }
+    </div>
+    <mat-paginator
+      [length]="total()"
+      [pageIndex]="page - 1"
+      [pageSize]="pageSize"
+      [pageSizeOptions]="[10, 20, 50]"
+      (page)="onPage($event)"
+    />
+  }
+}

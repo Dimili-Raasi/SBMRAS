@@ -1,0 +1,64 @@
+<div class="sb-dialog-head">
+  <mat-icon class="head-icon">{{ config.icon }}</mat-icon>
+  <div class="grow">
+    <h2 mat-dialog-title>{{ isNew ? 'Add ' + config.singular : 'Edit ' + config.singular }}</h2>
+    @if (row) {
+      <div class="muted small"><span class="mono">#{{ row.id }}</span> · {{ row.name }}</div>
+    }
+  </div>
+  <button mat-icon-button type="button" aria-label="Close" (click)="close()"><mat-icon>close</mat-icon></button>
+</div>
+@if (saving()) {
+  <mat-progress-bar mode="indeterminate" />
+}
+<form [formGroup]="form" (ngSubmit)="save()" novalidate>
+  <mat-dialog-content>
+    <div class="sb-form-grid">
+      @if (formError()) {
+        <div class="sb-form-error span-2" role="alert"><mat-icon>error</mat-icon>{{ formError() }}</div>
+      }
+      @for (f of config.fields; track f.key) {
+        <mat-form-field appearance="outline" [class.span-2]="f.wide || f.kind === 'textarea'">
+          <mat-label>{{ f.label }}</mat-label>
+          @switch (f.kind) {
+            @case ('select') {
+              <mat-select [formControl]="ctrl(f.key)" [required]="!!f.required">
+                @for (o of options()[f.key]; track o.value) {
+                  <mat-option [value]="o.value">{{ o.label }}</mat-option>
+                }
+              </mat-select>
+            }
+            @case ('textarea') {
+              <textarea matInput rows="3" [formControl]="ctrl(f.key)" [attr.maxlength]="f.maxLength ?? null"></textarea>
+            }
+            @case ('number') {
+              <input matInput type="number" class="mono" [formControl]="ctrl(f.key)" [required]="!!f.required" [attr.min]="f.min ?? null" [attr.max]="f.max ?? null" />
+            }
+            @case ('code') {
+              <input matInput class="mono text-uppercase" [formControl]="ctrl(f.key)" [required]="!!f.required" [attr.maxlength]="f.maxLength ?? null" />
+            }
+            @default {
+              <input matInput [formControl]="ctrl(f.key)" [required]="!!f.required" [attr.maxlength]="f.maxLength ?? null" />
+            }
+          }
+          @if (f.hint) {
+            <mat-hint>{{ f.hint }}</mat-hint>
+          }
+          @if (ctrl(f.key).invalid) {
+            <mat-error>{{ errorFor(f) }}</mat-error>
+          }
+        </mat-form-field>
+      }
+      <div class="sb-toggle-row span-2">
+        <mat-slide-toggle [formControl]="ctrl('isActive')">Active</mat-slide-toggle>
+      </div>
+    </div>
+  </mat-dialog-content>
+  <mat-dialog-actions align="end">
+    <button mat-button type="button" (click)="close()">Cancel</button>
+    <button mat-flat-button color="primary" type="submit" [disabled]="saving() || (!isNew && form.pristine)">
+      <mat-icon>save</mat-icon>
+      {{ isNew ? 'Create' : 'Save changes' }}
+    </button>
+  </mat-dialog-actions>
+</form>

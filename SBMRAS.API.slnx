@@ -1,0 +1,6 @@
+﻿<Solution>
+  <Project Path="SBMRAS.API/SBMRAS.API.csproj" />
+  <Project Path="SBMRAS.Application/SBMRAS.Application.csproj" />
+  <Project Path="SBMRAS.Domain/SBMRAS.Domain.csproj" />
+  <Project Path="SBMRAS.Infrastructure/SBMRAS.Infrastructure.csproj" />
+</Solution>

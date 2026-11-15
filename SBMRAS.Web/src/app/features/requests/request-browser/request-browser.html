@@ -1,0 +1,205 @@
+@if (isCoordination()) {
+  <sb-page-header
+    title="Request Coordination"
+    subtitle="Review, match, contact and close blood requests. Emergency and overdue requests are emphasised."
+    icon="hub"
+  >
+    <button mat-stroked-button type="button" (click)="reload()">
+      <mat-icon>refresh</mat-icon>
+      Refresh
+    </button>
+  </sb-page-header>
+} @else {
+  <sb-page-header
+    title="My Requests"
+    subtitle="Track the blood requests you have raised. SBMRAS coordinates requests — it does not reserve stock."
+    icon="assignment"
+  >
+    <a mat-flat-button color="primary" routerLink="/requests/new" *sbHasPermission="P.RequestsCreate">
+      <mat-icon>add_circle</mat-icon>
+      New request
+    </a>
+  </sb-page-header>
+}
+
+<section class="sb-req-card">
+  <div class="sb-req-chips" role="toolbar" aria-label="Quick status filter">
+    <button
+      type="button"
+      class="sb-req-chip"
+      [class.active]="!filters.controls.status.value"
+      (click)="filters.controls.status.setValue('')"
+    >
+      All
+    </button>
+    @for (s of statuses; track s) {
+      <button
+        type="button"
+        class="sb-req-chip"
+        [attr.data-status]="s"
+        [class.active]="filters.controls.status.value === s"
+        (click)="quickStatus(s)"
+      >
+        {{ statusLabel(s) }}
+      </button>
+    }
+  </div>
+
+  <form class="sb-req-filters" [formGroup]="filters" (submit)="$event.preventDefault()">
+    <mat-form-field appearance="outline" subscriptSizing="dynamic" class="grow">
+      <mat-label>Search</mat-label>
+      <mat-icon matPrefix>search</mat-icon>
+      <input
+        matInput
+        formControlName="search"
+        maxlength="100"
+        [placeholder]="isCoordination() ? 'Reference, hospital, requester' : 'Reference or hospital'"
+      />
+    </mat-form-field>
+    <mat-form-field appearance="outline" subscriptSizing="dynamic">
+      <mat-label>Urgency</mat-label>
+      <mat-select formControlName="urgency">
+        <mat-option value="">Any urgency</mat-option>
+        @for (u of urgencies; track u) {
+          <mat-option [value]="u">{{ u }}</mat-option>
+        }
+      </mat-select>
+    </mat-form-field>
+    <mat-form-field appearance="outline" subscriptSizing="dynamic">
+      <mat-label>ABO group</mat-label>
+      <mat-select formControlName="aboGroup">
+        <mat-option value="">Any group</mat-option>
+        @for (g of aboGroups; track g) {
+          <mat-option [value]="g">{{ g }}</mat-option>
+        }
+      </mat-select>
+    </mat-form-field>
+    <mat-form-field appearance="outline" subscriptSizing="dynamic">
+      <mat-label>Area</mat-label>
+      <mat-select formControlName="areaId">
+        <mat-option [value]="null">All areas</mat-option>
+        @for (a of areas(); track a.areaId) {
+          <mat-option [value]="a.areaId">{{ a.name }}</mat-option>
+        }
+      </mat-select>
+    </mat-form-field>
+    @if (hasFilters()) {
+      <button mat-stroked-button type="button" (click)="clearFilters()">
+        <mat-icon>filter_alt_off</mat-icon>
+        Clear
+      </button>
+    }
+  </form>
+
+  @switch (state()) {
+    @case ('loading') {
+      <sb-state-panel state="loading" message="Loading requests…" />
+    }
+    @case ('error') {
+      <sb-state-panel state="error" [message]="error()" (retry)="reload()" />
+    }
+    @case ('empty') {
+      <sb-state-panel
+        state="empty"
+        [message]="
+          hasFilters()
+            ? 'No requests match the selected filters.'
+            : isCoordination()
+              ? 'There are no requests in the coordination queue.'
+              : 'You have not raised any blood requests yet.'
+        "
+      />
+      @if (!isCoordination() && !hasFilters()) {
+        <div class="sb-req-empty-action">
+          <a mat-flat-button color="primary" routerLink="/requests/new" *sbHasPermission="P.RequestsCreate">
+            <mat-icon>add_circle</mat-icon>
+            Raise a blood request
+          </a>
+        </div>
+      }
+    }
+    @default {
+      <div class="sb-req-table-wrap">
+        <table class="sb-req-table">
+          <thead>
+            <tr>
+              <th>Reference</th>
+              <th>Blood</th>
+              <th class="num">Quantity</th>
+              <th>Urgency</th>
+              <th>Needed by</th>
+              <th>Area / hospital</th>
+              @if (isCoordination()) {
+                <th>Requester</th>
+              }
+              <th>Status</th>
+              <th>Updated</th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (r of items(); track r.requestId) {
+              @let sla = slaLevel(r.neededBy, r.status, now());
+              <tr
+                tabindex="0"
+                [class.emergency]="isCoordination() && r.urgency === 'Emergency' && sla !== 'none'"
+                [attr.data-sla]="isCoordination() ? sla : null"
+                (click)="open(r)"
+                (keydown.enter)="open(r)"
+              >
+                <td>
+                  <a
+                    class="sb-mono sb-req-ref"
+                    [routerLink]="[detailBase(), r.requestId]"
+                    (click)="$event.stopPropagation()"
+                    >{{ r.requestNo }}</a
+                  >
+                </td>
+                <td>
+                  <div class="sb-req-blood">
+                    <sb-blood-group-tile [aboGroup]="r.aboGroup" [rhFactor]="r.rhFactor" size="sm" />
+                    <span class="muted">{{ r.componentCode || r.componentName || 'Not reported' }}</span>
+                  </div>
+                </td>
+                <td class="num sb-mono">
+                  @if (r.quantityRequested !== null && r.quantityRequested !== undefined) {
+                    {{ r.quantityRequested | sbQty }} {{ r.unitCode }}
+                  } @else {
+                    <span class="muted">Not reported</span>
+                  }
+                </td>
+                <td><sb-urgency-badge [urgency]="r.urgency" /></td>
+                <td>
+                  @if (r.neededBy) {
+                    <div>{{ r.neededBy | sbDate }}</div>
+                    @if (isCoordination() && sla !== 'none') {
+                      <div class="sb-req-sla" [attr.data-sla]="sla">{{ slaText(r.neededBy, now()) }}</div>
+                    }
+                  } @else {
+                    <span class="muted">Not reported</span>
+                  }
+                </td>
+                <td>
+                  <div>{{ r.areaName || 'Not reported' }}</div>
+                  <div class="muted small">{{ r.hospitalName }}</div>
+                </td>
+                @if (isCoordination()) {
+                  <td>{{ r.requesterName || 'Not reported' }}</td>
+                }
+                <td><sb-status-chip [status]="r.status" /></td>
+                <td class="muted">{{ r.updatedAt || r.createdAt | sbRelative }}</td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+      <mat-paginator
+        [length]="total()"
+        [pageIndex]="page() - 1"
+        [pageSize]="pageSize()"
+        [pageSizeOptions]="[10, 20, 50]"
+        (page)="onPage($event)"
+        aria-label="Request pages"
+      />
+    }
+  }
+</section>

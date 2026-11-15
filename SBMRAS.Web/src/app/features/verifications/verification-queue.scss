@@ -1,0 +1,154 @@
+:host {
+  display: block;
+}
+
+.sb-card {
+  background: var(--sb-surface, #fff);
+  border: 1px solid var(--sb-border, #dce3ea);
+  border-radius: 10px;
+  box-shadow: 0 1px 3px rgba(11, 31, 51, 0.05);
+  padding: 16px;
+  margin-bottom: 16px;
+}
+
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+
+  mat-form-field {
+    min-width: 200px;
+  }
+}
+
+.mono {
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+}
+
+.muted {
+  color: var(--sb-muted, #5b6b7b);
+}
+
+.small {
+  font-size: 0.8rem;
+}
+
+.change--pending {
+  border-left: 4px solid #7b4fd6;
+}
+
+.change__head {
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+
+  > div:first-child {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+  }
+}
+
+.change__no {
+  font-weight: 600;
+  margin-right: 4px;
+}
+
+.chg-status,
+.flag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  border: 1px solid currentColor;
+}
+
+.chg-status--pendingreview {
+  color: #7b4fd6;
+}
+
+.chg-status--applied {
+  color: #2e9e5b;
+}
+
+.chg-status--rejected {
+  color: #d93025;
+}
+
+.flag {
+  color: #8a5a00;
+  background: rgba(242, 169, 0, 0.12);
+  border-color: transparent;
+}
+
+.flag--jump {
+  color: #8e0c21;
+  background: rgba(200, 16, 46, 0.1);
+}
+
+.change__body {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(260px, 1.4fr) minmax(200px, 1.2fr);
+  gap: 16px;
+  align-items: start;
+
+  @media (max-width: 991px) {
+    grid-template-columns: 1fr;
+  }
+}
+
+.item-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+
+  mat-icon {
+    color: #c8102e;
+  }
+}
+
+.diff {
+  border-collapse: collapse;
+  font-size: 0.875rem;
+
+  th,
+  td {
+    padding: 4px 8px;
+    text-align: left;
+  }
+
+  thead th {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    color: var(--sb-muted, #5b6b7b);
+  }
+
+  .old {
+    color: var(--sb-muted, #5b6b7b);
+  }
+
+  .new.changed {
+    font-weight: 700;
+    color: #0b1f33;
+  }
+
+  .delta {
+    color: #8e0c21;
+  }
+}
+
+.change__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--sb-border, #dce3ea);
+}

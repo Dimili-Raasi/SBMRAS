@@ -1,0 +1,163 @@
+@if (!session.hasPermission(permissions.DashboardView)) {
+  <section class="access-message" role="status">
+    <mat-icon>lock</mat-icon>
+    <div><h2>Dashboard access required</h2><p>Your account does not have permission to view dashboard insights.</p></div>
+  </section>
+} @else {
+  <sb-page-header
+    title="Dashboard"
+    [subtitle]="isPublicUser() ? 'A focused view of your requests and recent activity.' : 'Operational health and work awaiting your attention.'"
+    icon="monitor_heart"
+  >
+    <button mat-stroked-button type="button" (click)="reload()">
+      <mat-icon>refresh</mat-icon> Refresh
+    </button>
+  </sb-page-header>
+
+  @switch (summaryState()) {
+    @case ('loading') {
+      <sb-state-panel state="loading" message="Loading dashboard totals…" />
+    }
+    @case ('error') {
+      <sb-state-panel state="error" [message]="summaryError()" (retry)="loadSummary()" />
+    }
+    @case ('empty') {
+      <sb-state-panel state="empty" message="No dashboard summary is available for your account yet." />
+    }
+    @default {
+      @if (summary(); as totals) {
+        <div class="kpi-grid">
+          @for (card of metricCards(totals); track card.label) {
+            <sb-kpi-card
+              [label]="card.label"
+              [value]="cardValue(card.value)"
+              [icon]="card.icon"
+              [hint]="card.hint"
+              [route]="card.route"
+            />
+          }
+        </div>
+
+        <section class="insight-grid">
+          <article class="panel quality-panel">
+            <div class="panel-heading">
+              <div><h2>Freshness &amp; quality</h2><p>Current condition of reported information</p></div>
+              <a routerLink="/data-quality">View quality <mat-icon>arrow_forward</mat-icon></a>
+            </div>
+            <div class="quality-metrics">
+              <div class="quality-stat">
+                <span>Fresh inventory</span>
+                <strong>{{ metric(totals.freshPercent, true) }}</strong>
+                <small>Records within their reporting window</small>
+              </div>
+              <div class="quality-stat">
+                <span>Average quality score</span>
+                <sb-quality-gauge [score]="totals.avgQualityScore" />
+                <small>Completeness, recency and verification</small>
+              </div>
+              <div class="quality-stat">
+                <span>Stale records</span>
+                <strong>{{ metric(totals.staleRecords) }}</strong>
+                <small>May need a facility refresh</small>
+              </div>
+            </div>
+            @switch (chartState()) {
+              @case ('loading') { <sb-state-panel state="loading" message="Loading freshness breakdown…" /> }
+              @case ('error') { <sb-state-panel state="error" [message]="chartError()" (retry)="loadCharts()" /> }
+              @case ('empty') { <p class="muted chart-note">Freshness breakdown is not reported yet.</p> }
+              @default {
+                @if (freshnessChart().labels.length) {
+                  <sb-chart-view type="bar" [labels]="freshnessChart().labels" [datasets]="freshnessChart().datasets" [height]="190" />
+                } @else {
+                  <p class="muted chart-note">Freshness breakdown is not reported yet.</p>
+                }
+              }
+            }
+          </article>
+
+          <article class="panel trend-panel">
+            <div class="panel-heading">
+              <div><h2>Request trends</h2><p>Submitted and fulfilled over time</p></div>
+              <a routerLink="/requests">Open requests <mat-icon>arrow_forward</mat-icon></a>
+            </div>
+            @switch (chartState()) {
+              @case ('loading') { <sb-state-panel state="loading" message="Loading request trends…" /> }
+              @case ('error') { <sb-state-panel state="error" [message]="chartError()" (retry)="loadCharts()" /> }
+              @case ('empty') { <sb-state-panel state="empty" message="Request trends are not reported yet." /> }
+              @default {
+                @if (requestTrend().labels.length) {
+                  <div class="legend"><span><i class="submitted"></i> Submitted</span><span><i class="fulfilled"></i> Fulfilled</span></div>
+                  <sb-chart-view type="bar" [labels]="requestTrend().labels" [datasets]="requestTrend().datasets" [height]="230" />
+                } @else {
+                  <sb-state-panel state="empty" message="Request trends are not reported yet." />
+                }
+              }
+            }
+          </article>
+        </section>
+
+        <section class="insight-grid lower-grid">
+          <article class="panel">
+            <div class="panel-heading">
+              <div><h2>{{ isPublicUser() ? 'My worklist' : 'Worklist' }}</h2><p>Role-scoped items that need attention</p></div>
+              <span class="count">{{ worklist().length }}</span>
+            </div>
+            @switch (worklistState()) {
+              @case ('loading') { <sb-state-panel state="loading" message="Loading your worklist…" /> }
+              @case ('error') { <sb-state-panel state="error" [message]="worklistError()" (retry)="loadWorklist()" /> }
+              @case ('empty') { <sb-state-panel state="empty" message="Nothing is waiting for your attention." /> }
+              @default {
+                <ul class="worklist">
+                  @for (item of worklist(); track item.referenceNo || item.title) {
+                    <li>
+                      <span class="work-icon"><mat-icon>{{ item.type === 'Request' ? 'assignment' : 'fact_check' }}</mat-icon></span>
+                      <div class="work-body">
+                        <a [routerLink]="item.route || null">{{ item.title }}</a>
+                        <div class="work-meta">
+                          @if (item.referenceNo) { <span class="mono">{{ item.referenceNo }}</span> }
+                          @if (item.status) { <span class="status">{{ item.status }}</span> }
+                          @if (item.priority) { <span class="priority">{{ item.priority }}</span> }
+                          @if (item.dueAt) { <span>Due {{ item.dueAt | date: 'dd MMM, HH:mm' }}</span> }
+                          @else { <span>Due date not reported</span> }
+                        </div>
+                      </div>
+                    </li>
+                  }
+                </ul>
+              }
+            }
+          </article>
+
+          <article class="panel">
+            <div class="panel-heading">
+              <div><h2>{{ isPublicUser() ? 'My recent activity' : 'Recent activity' }}</h2><p>Latest changes visible in your scope</p></div>
+              @if (session.hasPermission('audit.view')) { <a routerLink="/audit-logs">Audit explorer <mat-icon>arrow_forward</mat-icon></a> }
+            </div>
+            @switch (activityState()) {
+              @case ('loading') { <sb-state-panel state="loading" message="Loading recent activity…" /> }
+              @case ('error') { <sb-state-panel state="error" [message]="activityError()" (retry)="loadActivity()" /> }
+              @case ('empty') { <sb-state-panel state="empty" message="No recent activity is available." /> }
+              @default {
+                <ol class="activity-list">
+                  @for (entry of activity(); track entry.auditId) {
+                    <li>
+                      <span class="activity-dot"></span>
+                      <div>
+                        <strong>{{ entry.action }}</strong>
+                        <p>{{ entry.description }}</p>
+                        <small>
+                          {{ entry.userName || 'System' }} · {{ entry.createdAt | date: 'dd MMM, HH:mm' }}
+                          @if (entry.referenceNo) { · <span class="mono">{{ entry.referenceNo }}</span> }
+                        </small>
+                      </div>
+                    </li>
+                  }
+                </ol>
+              }
+            }
+          </article>
+        </section>
+      }
+    }
+  }
+}

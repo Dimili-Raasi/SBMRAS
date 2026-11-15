@@ -1,0 +1,154 @@
+<sb-page-header
+  title="Find blood"
+  subtitle="Search reported blood availability from verified blood banks. Always reconfirm directly with the facility."
+  icon="bloodtype"
+>
+  <button mat-stroked-button type="button" (click)="reload()" aria-label="Refresh blood availability">
+    <mat-icon>refresh</mat-icon> Refresh
+  </button>
+</sb-page-header>
+
+<section class="blood-search">
+  <form class="filter-grid" [formGroup]="filters" (submit)="$event.preventDefault()">
+    <mat-form-field appearance="outline" subscriptSizing="dynamic" class="search-field">
+      <mat-label>Facility, area or city</mat-label>
+      <mat-icon matPrefix>search</mat-icon>
+      <input matInput formControlName="search" maxlength="100" />
+    </mat-form-field>
+    <mat-form-field appearance="outline" subscriptSizing="dynamic">
+      <mat-label>Blood group</mat-label>
+      <mat-select formControlName="aboGroup">
+        <mat-option value="">Any ABO group</mat-option>
+        @for (group of ['A', 'B', 'AB', 'O']; track group) {
+          <mat-option [value]="group">{{ group }}</mat-option>
+        }
+      </mat-select>
+    </mat-form-field>
+    <mat-form-field appearance="outline" subscriptSizing="dynamic">
+      <mat-label>Rh factor</mat-label>
+      <mat-select formControlName="rhFactor">
+        <mat-option value="">Any Rh factor</mat-option>
+        <mat-option value="Positive">Positive (+)</mat-option>
+        <mat-option value="Negative">Negative (−)</mat-option>
+      </mat-select>
+    </mat-form-field>
+    <mat-form-field appearance="outline" subscriptSizing="dynamic">
+      <mat-label>Component</mat-label>
+      <mat-select formControlName="componentId">
+        <mat-option [value]="null">Any component</mat-option>
+        @for (component of components(); track component.componentId) {
+          <mat-option [value]="component.componentId">{{ component.code }} · {{ component.name }}</mat-option>
+        }
+      </mat-select>
+    </mat-form-field>
+    <mat-form-field appearance="outline" subscriptSizing="dynamic">
+      <mat-label>Area</mat-label>
+      <mat-select formControlName="areaId">
+        <mat-option [value]="null">All areas</mat-option>
+        @for (area of areas(); track area.areaId) {
+          <mat-option [value]="area.areaId">{{ area.name }} · {{ area.city }}</mat-option>
+        }
+      </mat-select>
+    </mat-form-field>
+    <mat-form-field appearance="outline" subscriptSizing="dynamic" class="min-quantity">
+      <mat-label>Minimum quantity</mat-label>
+      <input matInput formControlName="minQuantity" type="number" min="0" step="1" />
+    </mat-form-field>
+    <mat-checkbox class="fresh-filter" formControlName="freshOnly">Fresh records only</mat-checkbox>
+    @if (hasFilters()) {
+      <button mat-button class="clear-filter" type="button" (click)="clearFilters()">
+        <mat-icon>filter_alt_off</mat-icon> Clear filters
+      </button>
+    }
+  </form>
+
+  @switch (state()) {
+    @case ('loading') {
+      <sb-state-panel state="loading" message="Searching current blood availability…" />
+    }
+    @case ('error') {
+      <sb-state-panel state="error" [message]="error()" (retry)="reload()" />
+    }
+    @case ('empty') {
+      <sb-state-panel
+        state="empty"
+        [message]="hasFilters() ? 'No blood records match these filters. Try broadening your search.' : 'No blood availability has been reported yet.'"
+      />
+    }
+    @default {
+      <div class="result-heading" aria-live="polite">
+        <p><strong>{{ total() }}</strong> reported record{{ total() === 1 ? '' : 's' }}</p>
+        <span>Availability can change; please contact the facility.</span>
+      </div>
+      <div class="result-grid" aria-label="Blood availability results">
+        @for (item of items(); track item.inventoryId) {
+          <article class="result-card">
+            <header class="card-heading">
+              <sb-blood-group-tile [aboGroup]="item.aboGroup" [rhFactor]="item.rhFactor" size="large" />
+              <div class="card-heading__title">
+                <h2>{{ item.componentName || item.componentCode || 'Blood component' }}</h2>
+                <span class="mono">{{ item.componentCode || 'Component not reported' }}</span>
+              </div>
+              <span class="availability" [attr.data-status]="item.availabilityStatus || 'Unknown'">
+                {{ item.availabilityStatus || 'Not reported' }}
+              </span>
+            </header>
+            <div class="quantity-line">
+              <span>Reported quantity</span>
+              @if (item.quantity !== null && item.quantity !== undefined) {
+                <strong class="mono">{{ item.quantity | sbQty }} {{ item.unitCode || '' }}</strong>
+              } @else {
+                <strong class="not-reported">Not reported</strong>
+              }
+            </div>
+            <div class="facility-block">
+              <mat-icon>domain</mat-icon>
+              <div>
+                <h3>{{ item.facilityName || 'Facility not reported' }}</h3>
+                <p>{{ item.areaName || 'Area not reported' }}@if (item.city) { · {{ item.city }} }</p>
+                @if (item.addressLine) { <p class="address">{{ item.addressLine }}</p> }
+              </div>
+            </div>
+            <div class="data-meta">
+              <sb-freshness-badge
+                [status]="item.freshnessStatus"
+                [lastUpdatedAt]="item.lastUpdatedAt"
+                [validUntil]="item.validUntil"
+              />
+              <div class="quality-meta">
+                <span>Data quality</span>
+                @if (item.qualityScore !== null && item.qualityScore !== undefined) {
+                  <sb-quality-gauge [score]="item.qualityScore" />
+                } @else {
+                  <span class="not-reported">Not reported</span>
+                }
+              </div>
+            </div>
+            <footer class="card-footer">
+              <div class="contact">
+                @if (item.is24x7) { <span class="hours"><mat-icon>schedule</mat-icon> 24/7</span> }
+                @if (item.contactPhone) {
+                  <a [href]="'tel:' + item.contactPhone"><mat-icon>call</mat-icon> {{ item.contactPhone }}</a>
+                } @else {
+                  <span class="not-reported">Contact not reported</span>
+                }
+              </div>
+              <button mat-stroked-button color="primary" type="button" (click)="requestFor(item)">
+                <mat-icon>add_circle</mat-icon>
+                {{ isAuthenticated() ? 'Create request' : 'Sign in to request' }}
+              </button>
+            </footer>
+          </article>
+        }
+      </div>
+      <mat-paginator
+        [length]="total()"
+        [pageIndex]="page() - 1"
+        [pageSize]="pageSize()"
+        [pageSizeOptions]="[12, 24, 48]"
+        (page)="onPage($event)"
+        aria-label="Blood availability result pages"
+      />
+    }
+  }
+</section>

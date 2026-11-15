@@ -1,0 +1,112 @@
+@if (!session.hasPermission(permissions.ReportsView)) {
+  <section class="access-message" role="status">
+    <mat-icon>lock</mat-icon>
+    <div><h2>Reports access required</h2><p>Your account does not have permission to view reports.</p></div>
+  </section>
+} @else {
+  <sb-page-header
+    title="Reports"
+    subtitle="Explore scoped operational reports and export filtered results."
+    icon="insights"
+  >
+    <button
+      *sbHasPermission="'reports.export'"
+      mat-flat-button
+      color="primary"
+      type="button"
+      (click)="exportCsv()"
+      [disabled]="!reportCode || exporting() || resultState() === 'loading'"
+    >
+      @if (exporting()) { <mat-icon>hourglass_top</mat-icon> } @else { <mat-icon>download</mat-icon> }
+      Export CSV
+    </button>
+  </sb-page-header>
+
+  @switch (reportListState()) {
+    @case ('loading') { <sb-state-panel state="loading" message="Loading available reports…" /> }
+    @case ('error') { <sb-state-panel state="error" [message]="reportListError()" (retry)="loadDefinitions()" /> }
+    @case ('empty') { <sb-state-panel state="empty" message="No reports are available for your account." /> }
+    @default {
+      <form class="filter-panel" (ngSubmit)="applyFilters()">
+        <mat-form-field appearance="outline" subscriptSizing="dynamic">
+          <mat-label>Report</mat-label>
+          <mat-select name="reportCode" [(ngModel)]="reportCode" (selectionChange)="onReportChange()">
+            @for (definition of definitions(); track definition.code) {
+              <mat-option [value]="definition.code">{{ definition.name }}</mat-option>
+            }
+          </mat-select>
+        </mat-form-field>
+        <mat-form-field appearance="outline" subscriptSizing="dynamic">
+          <mat-label>From date</mat-label>
+          <input matInput type="date" name="fromDate" [(ngModel)]="fromDate" />
+        </mat-form-field>
+        <mat-form-field appearance="outline" subscriptSizing="dynamic">
+          <mat-label>To date</mat-label>
+          <input matInput type="date" name="toDate" [(ngModel)]="toDate" />
+        </mat-form-field>
+        <mat-form-field appearance="outline" subscriptSizing="dynamic">
+          <mat-label>Facility</mat-label>
+          <mat-select name="facilityId" [(ngModel)]="facilityId">
+            <mat-option [value]="null">All accessible facilities</mat-option>
+            @for (facility of facilities(); track facility.facilityId) {
+              <mat-option [value]="facility.facilityId">{{ facility.name }} · {{ facility.facilityType }}</mat-option>
+            }
+          </mat-select>
+        </mat-form-field>
+        <button mat-flat-button color="primary" type="submit"><mat-icon>filter_alt</mat-icon> Apply</button>
+      </form>
+
+      @if (facilityState() === 'error') {
+        <div class="filter-error">
+          <span>{{ facilityError() }}</span>
+          <button mat-button type="button" (click)="loadFacilities()">Retry facility list</button>
+        </div>
+      } @else if (facilityState() === 'loading') {
+        <p class="facility-status">Loading facility options…</p>
+      } @else if (facilityState() === 'empty') {
+        <p class="facility-status">No facilities are assigned in your accessible scope; run the report without a facility filter.</p>
+      }
+      @if (validationError) { <p class="validation-message" role="alert">{{ validationError }}</p> }
+
+      @if (result(); as report) {
+        <section class="report-intro">
+          <div><h2>{{ report.name }}</h2><p>{{ reportDescription(report.code) }}</p></div>
+          <span class="code">{{ report.code }}</span>
+        </section>
+      }
+
+      @switch (resultState()) {
+        @case ('loading') { <sb-state-panel state="loading" message="Running the selected report…" /> }
+        @case ('error') { <sb-state-panel state="error" [message]="resultError()" (retry)="loadReport()" /> }
+        @case ('empty') { <sb-state-panel state="empty" message="No rows match the selected report and filters." /> }
+        @default {
+          @if (result(); as report) {
+            @if (report.chart; as chart) {
+              @if (chart.labels.length) {
+                <section class="report-chart">
+                  <h3>Report visualization</h3>
+                  <sb-chart-view [type]="chart.type" [labels]="chart.labels" [datasets]="chart.datasets" [height]="240" />
+                </section>
+              }
+            }
+            @if (report.rows.length) {
+              <section class="table-panel">
+                <div class="table-heading"><h3>Report data</h3><span>{{ report.rows.length }} rows</span></div>
+                <div class="table-scroll">
+                  <table>
+                    <thead><tr>@for (column of report.columns; track column.key) { <th>{{ column.label }}</th> }</tr></thead>
+                    <tbody>
+                      @for (row of report.rows; track $index) {
+                        <tr>@for (column of report.columns; track column.key) { <td [class.numeric]="column.type === 'number' || column.type === 'percent'">{{ cell(row, column) }}</td> }</tr>
+                      }
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            }
+          }
+        }
+      }
+    }
+  }
+}

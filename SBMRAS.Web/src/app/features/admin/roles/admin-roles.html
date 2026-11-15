@@ -1,0 +1,116 @@
+<sb-page-header
+  title="Roles & Permissions"
+  subtitle="Role catalogue mapped to Microsoft Entra app roles and groups, with the permission matrix that drives menus and API authorization."
+  icon="admin_panel_settings"
+>
+  @if (state() === 'ready') {
+    <ng-container *sbHasPermission="P.RolesManage">
+      <button mat-stroked-button type="button" [disabled]="saving() || !dirtyRoles().length" (click)="discard()">
+        <mat-icon>undo</mat-icon>
+        Discard
+      </button>
+      <button mat-flat-button color="primary" type="button" [disabled]="saving() || !dirtyRoles().length" (click)="save()">
+        <mat-icon>save</mat-icon>
+        Save changes @if (dirtyRoles().length) { ({{ dirtyRoles().length }}) }
+      </button>
+    </ng-container>
+  }
+</sb-page-header>
+
+@switch (state()) {
+  @case ('loading') {
+    <section class="sb-admin-card"><sb-state-panel state="loading" message="Loading roles and permissions…" /></section>
+  }
+  @case ('error') {
+    <section class="sb-admin-card"><sb-state-panel state="error" [message]="error()" (retry)="load()" /></section>
+  }
+  @case ('empty') {
+    <section class="sb-admin-card"><sb-state-panel state="empty" message="No roles or permissions are configured." /></section>
+  }
+  @default {
+    <div class="sb-role-cards">
+      @for (r of roles(); track r.roleId) {
+        <article class="sb-admin-card sb-role-card" [attr.data-role]="r.roleCode">
+          <header>
+            <span class="sb-role-chip" [attr.data-role]="r.roleCode">{{ r.roleName }}</span>
+            <span class="mono muted small">{{ r.roleCode }}</span>
+          </header>
+          <p class="small">{{ r.description || 'No description.' }}</p>
+          <dl class="sb-meta">
+            <dt>Entra app role</dt>
+            <dd class="mono">{{ r.entraAppRole || '—' }}</dd>
+            <dt>Entra group</dt>
+            <dd class="mono">{{ r.entraGroupName || 'Not mapped' }}</dd>
+            <dt>Active users</dt>
+            <dd class="mono">{{ r.userCount }}</dd>
+            <dt>Permissions</dt>
+            <dd class="mono">{{ matrix()[r.roleId]?.size ?? 0 }} / {{ permissions().length }}</dd>
+          </dl>
+        </article>
+      }
+    </div>
+
+    <section class="sb-admin-card">
+      @if (saving()) {
+        <mat-progress-bar mode="indeterminate" />
+      }
+      @if (saveError()) {
+        <div class="sb-form-error" role="alert"><mat-icon>error</mat-icon>{{ saveError() }}</div>
+      }
+      <div class="sb-admin-table-wrap">
+        <table class="sb-admin-table sb-matrix">
+          <thead>
+            <tr>
+              <th>Permission</th>
+              @for (r of roles(); track r.roleId) {
+                <th class="center">
+                  <div class="matrix-head">
+                    <span>{{ r.roleName }}</span>
+                    <mat-checkbox
+                      *sbHasPermission="P.RolesManage"
+                      [checked]="columnState(r) === 'all'"
+                      [indeterminate]="columnState(r) === 'some'"
+                      [disabled]="saving()"
+                      (change)="toggleColumn(r, $event.checked)"
+                      [aria-label]="'Toggle all permissions for ' + r.roleName"
+                    />
+                  </div>
+                </th>
+              }
+            </tr>
+          </thead>
+          <tbody>
+            @for (g of groups(); track g.module) {
+              <tr class="group-row">
+                <th [attr.colspan]="roles().length + 1">{{ g.module }}</th>
+              </tr>
+              @for (p of g.permissions; track p.permissionCode) {
+                <tr>
+                  <td>
+                    <div>{{ p.permissionName }}</div>
+                    <div class="mono muted small" [title]="p.description || ''">{{ p.permissionCode }}</div>
+                  </td>
+                  @for (r of roles(); track r.roleId) {
+                    <td class="center" [class.changed]="changedCell(r, p.permissionCode)">
+                      <mat-checkbox
+                        [checked]="has(r, p.permissionCode)"
+                        [disabled]="saving() || locked(r, p.permissionCode) || !hasManage()"
+                        [matTooltip]="locked(r, p.permissionCode) ? 'The Administrator role must keep this permission' : ''"
+                        (change)="toggle(r, p.permissionCode, $event.checked)"
+                        [aria-label]="r.roleName + ': ' + p.permissionName"
+                      />
+                    </td>
+                  }
+                </tr>
+              }
+            }
+          </tbody>
+        </table>
+      </div>
+      <p class="muted small mt-2">
+        <span class="changed-swatch"></span> Highlighted cells have unsaved changes. Entra app roles grant the same database role;
+        permission changes apply to all members.
+      </p>
+    </section>
+  }
+}

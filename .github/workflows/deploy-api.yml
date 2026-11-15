@@ -1,0 +1,278 @@
+name: Deploy API
+
+# Manual only. Publishes SBMRAS.API, checks the package, deploys it to the Flex Consumption Function App,
+# re-applies the application settings the API reads (SqlConnectionString, Auth:*, Cors:*, Freshness:*, Import:*),
+# makes sure the Function App CORS allows the web origin, and smoke-tests GET /api/v1/auth/config.
+# Create the Function App first with deploy-infra.yml. SBMRAS stores no files, so there are no blob/attachment settings.
+# Pick the branch in Actions > Run workflow > "Use workflow from". Every job checks out that run's exact commit
+# (github.sha), so the Bicep, scripts, local actions and app source all come from the same commit.
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment
+        type: choice
+        options:
+          - dev
+          - test
+          - prod
+        default: dev
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-api-${{ inputs.environment }}
+  cancel-in-progress: false
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  PUBLISH_DIR: artifacts/api
+
+jobs:
+  branch-guard:
+    name: Branch policy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: ./.github/actions/assert-deploy-branch
+        with:
+          environment: ${{ inputs.environment }}
+
+  build:
+    name: Publish API
+    needs: branch-guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Publish
+        run: dotnet publish SBMRAS.API/SBMRAS.API.csproj --configuration Release --output "$PUBLISH_DIR"
+
+      - name: Check package
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f "$PUBLISH_DIR/host.json" || { echo "::error::host.json is not at the publish root."; exit 1; }
+          test -f "$PUBLISH_DIR/SBMRAS.API.dll" || { echo "::error::SBMRAS.API.dll is not at the publish root."; exit 1; }
+          rm -f "$PUBLISH_DIR/local.settings.json" "$PUBLISH_DIR/local.settings.sample.json"
+          (cd "$PUBLISH_DIR" && zip -qr "$GITHUB_WORKSPACE/api.zip" .)
+          unzip -l api.zip | awk '{print $4}' | grep -qx 'host.json' || { echo "::error::host.json is not at the zip root."; exit 1; }
+          if unzip -l api.zip | awk '{print $4}' | grep -q 'local.settings.json'; then
+            echo "::error::local.settings.json must not be deployed."; exit 1
+          fi
+          echo "Package OK: $(du -h api.zip | cut -f1), host.json at root."
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: api-package
+          path: api.zip
+          retention-days: 7
+          if-no-files-found: error
+
+  deploy:
+    name: Deploy API (${{ inputs.environment }})
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ inputs.environment }}
+      url: https://${{ vars.FUNCTION_APP_NAME }}.azurewebsites.net/api/v1/auth/config
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      TARGET_ENV: ${{ inputs.environment }}
+      AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP || (inputs.environment == 'dev' && 'rg-sbmras-dev' || '') }}
+      FUNCTION_APP_NAME: ${{ vars.FUNCTION_APP_NAME }}
+      WEB_APP_NAME: ${{ vars.WEB_APP_NAME }}
+      WEB_ORIGINS: ${{ vars.WEB_ORIGINS }}
+      SQL_SERVER_NAME: ${{ vars.SQL_SERVER_NAME || (inputs.environment == 'dev' && 'sbmras-sql-dev' || '') }}
+      SQL_DATABASE_NAME: ${{ vars.SQL_DATABASE_NAME || (inputs.environment == 'dev' && 'SBMRAS' || '') }}
+      RUNTIME_IDENTITY_CLIENT_ID: ${{ vars.RUNTIME_IDENTITY_CLIENT_ID }}
+      # Optional Key Vault reference for SqlConnectionString (infra/main.bicep createKeyVault + sqlConnectionStringSecretName).
+      KEY_VAULT_NAME: ${{ vars.KEY_VAULT_NAME }}
+      SQL_CONNECTION_SECRET_NAME: ${{ vars.SQL_CONNECTION_SECRET_NAME }}
+      # Microsoft Entra External ID (SDD 17.2 / 17.3). Not secrets: tenant, client ids and group ids are public identifiers.
+      ENTRA_AUTHORITY: ${{ vars.ENTRA_AUTHORITY }}
+      ENTRA_TENANT_ID: ${{ vars.ENTRA_TENANT_ID }}
+      ENTRA_API_CLIENT_ID: ${{ vars.ENTRA_API_CLIENT_ID }}
+      ENTRA_SPA_CLIENT_ID: ${{ vars.ENTRA_SPA_CLIENT_ID }}
+      ENTRA_API_AUDIENCE: ${{ vars.ENTRA_API_AUDIENCE }}
+      ENTRA_API_SCOPE: ${{ vars.ENTRA_API_SCOPE || 'access_as_user' }}
+      ENTRA_USER_FLOW: ${{ vars.ENTRA_USER_FLOW || 'B2X_1_SBMRAS-SignUpSignIn' }}
+      ENTRA_GROUP_HOSPITAL_ID: ${{ vars.ENTRA_GROUP_HOSPITAL_ID }}
+      ENTRA_GROUP_BLOODBANK_ID: ${{ vars.ENTRA_GROUP_BLOODBANK_ID }}
+      ENTRA_GROUP_ADMIN_ID: ${{ vars.ENTRA_GROUP_ADMIN_ID }}
+      # Freshness defaults and import limit (database SystemSettings stay authoritative for freshness).
+      BLOOD_STOCK_TTL_MINUTES: ${{ vars.BLOOD_STOCK_TTL_MINUTES || '360' }}
+      RESOURCE_TTL_MINUTES: ${{ vars.RESOURCE_TTL_MINUTES || '240' }}
+      MAX_IMPORT_ROWS: ${{ vars.MAX_IMPORT_ROWS || '500' }}
+    steps:
+      - name: Check required variables
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing=()
+          for name in AZURE_RESOURCE_GROUP FUNCTION_APP_NAME SQL_SERVER_NAME SQL_DATABASE_NAME \
+                      ENTRA_AUTHORITY ENTRA_TENANT_ID ENTRA_API_CLIENT_ID ENTRA_SPA_CLIENT_ID; do
+            [ -n "${!name:-}" ] || missing+=("$name")
+          done
+          if [ -n "${SQL_CONNECTION_SECRET_NAME:-}" ]; then
+            [ -n "${KEY_VAULT_NAME:-}" ] || missing+=("KEY_VAULT_NAME (required with SQL_CONNECTION_SECRET_NAME)")
+          else
+            [ -n "${RUNTIME_IDENTITY_CLIENT_ID:-}" ] || missing+=("RUNTIME_IDENTITY_CLIENT_ID")
+          fi
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::Set these variables on the '$TARGET_ENV' GitHub environment: ${missing[*]}"
+            exit 1
+          fi
+          if [[ "$ENTRA_AUTHORITY" != https://*.ciamlogin.com/* ]]; then
+            echo "::warning::ENTRA_AUTHORITY '$ENTRA_AUTHORITY' is not an External ID authority (https://<tenant-subdomain>.ciamlogin.com/)."
+          fi
+          for name in ENTRA_GROUP_HOSPITAL_ID ENTRA_GROUP_BLOODBANK_ID ENTRA_GROUP_ADMIN_ID; do
+            if [ -z "${!name:-}" ]; then
+              echo "::warning::$name is empty: that group is not mapped to a role (the API app-role 'roles' claim still applies)."
+            fi
+          done
+          for name in BLOOD_STOCK_TTL_MINUTES RESOURCE_TTL_MINUTES MAX_IMPORT_ROWS; do
+            [[ "${!name}" =~ ^[1-9][0-9]*$ ]] || { echo "::error::$name must be a positive integer (got '${!name}')."; exit 1; }
+          done
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: api-package
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v3
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      # Keep in sync with the appSettings in infra/main.bicep and deploy/environment-variables.md. "__" replaces ":" on Linux.
+      # Merged into the existing settings; AzureWebJobsStorage__*, APPLICATIONINSIGHTS_CONNECTION_STRING
+      # and AZURE_CLIENT_ID are owned by infra/main.bicep and left untouched.
+      - name: Apply application settings
+        shell: bash
+        run: |
+          set -euo pipefail
+          sql_fqdn="${SQL_SERVER_NAME}.database.windows.net"
+          [[ "$SQL_SERVER_NAME" == *.* ]] && sql_fqdn="$SQL_SERVER_NAME"
+          if [ -n "${SQL_CONNECTION_SECRET_NAME:-}" ]; then
+            sql_connection="@Microsoft.KeyVault(VaultName=${KEY_VAULT_NAME};SecretName=${SQL_CONNECTION_SECRET_NAME})"
+          else
+            sql_connection="Server=tcp:${sql_fqdn},1433;Initial Catalog=${SQL_DATABASE_NAME};Authentication=Active Directory Managed Identity;User Id=${RUNTIME_IDENTITY_CLIENT_ID};Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;"
+          fi
+          audience="${ENTRA_API_AUDIENCE:-api://${ENTRA_API_CLIENT_ID}}"
+          # ENTRA_API_SCOPE may be the full api://<API-CLIENT-ID>/access_as_user; the API checks the scope name in scp.
+          scope="${ENTRA_API_SCOPE##*/}"
+          origins=()
+          [ -n "${WEB_APP_NAME:-}" ] && origins+=("https://${WEB_APP_NAME}.azurewebsites.net")
+          for o in ${WEB_ORIGINS//,/ }; do origins+=("$o"); done
+          cors_csv=$(IFS=,; echo "${origins[*]:-}")
+          settings=(
+            "Auth__Mode=EntraId"
+            "Auth__Entra__Instance=$ENTRA_AUTHORITY"
+            "Auth__Entra__TenantId=$ENTRA_TENANT_ID"
+            "Auth__Entra__ClientId=$ENTRA_API_CLIENT_ID"
+            "Auth__Entra__SpaClientId=$ENTRA_SPA_CLIENT_ID"
+            "Auth__Entra__Audience=$audience"
+            "Auth__Entra__RequiredScope=$scope"
+            "Auth__Entra__UserFlow=$ENTRA_USER_FLOW"
+            "Auth__Entra__Groups__HospitalManagement=${ENTRA_GROUP_HOSPITAL_ID:-}"
+            "Auth__Entra__Groups__BloodBank=${ENTRA_GROUP_BLOODBANK_ID:-}"
+            "Auth__Entra__Groups__Admin=${ENTRA_GROUP_ADMIN_ID:-}"
+            "Cors__AllowedOrigins=$cors_csv"
+            "Freshness__BloodStockTtlMinutes=$BLOOD_STOCK_TTL_MINUTES"
+            "Freshness__ResourceTtlMinutes=$RESOURCE_TTL_MINUTES"
+            "Import__MaxRows=$MAX_IMPORT_ROWS"
+            "SqlConnectionString=$sql_connection"
+          )
+          az functionapp config appsettings set \
+            --resource-group "$AZURE_RESOURCE_GROUP" --name "$FUNCTION_APP_NAME" \
+            --settings "${settings[@]}" --output none
+          echo "Applied ${#settings[@]} application settings to $FUNCTION_APP_NAME."
+          {
+            echo "### Application settings ($TARGET_ENV)"
+            echo
+            echo "| Setting | Value |"
+            echo "|---|---|"
+            for s in "${settings[@]}"; do
+              key="${s%%=*}"
+              case "$key" in
+                SqlConnectionString) echo "| $key | *(set)* |" ;;
+                *) echo "| $key | \`${s#*=}\` |" ;;
+              esac
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Host CORS: the SPA calls the Function App cross-origin. infra/main.bicep sets the web app origin; this
+      # re-adds it (plus optional WEB_ORIGINS, e.g. a Cloudflare hostname) in case the list was edited by hand.
+      - name: Ensure CORS origins
+        shell: bash
+        run: |
+          set -euo pipefail
+          origins=()
+          [ -n "${WEB_APP_NAME:-}" ] && origins+=("https://${WEB_APP_NAME}.azurewebsites.net")
+          for o in ${WEB_ORIGINS//,/ }; do origins+=("$o"); done
+          if [ ${#origins[@]} -eq 0 ]; then
+            echo "::warning::Neither WEB_APP_NAME nor WEB_ORIGINS is set; CORS left unchanged."
+            exit 0
+          fi
+          current=$(az functionapp cors show -g "$AZURE_RESOURCE_GROUP" -n "$FUNCTION_APP_NAME" --query allowedOrigins -o tsv || true)
+          for o in "${origins[@]}"; do
+            if grep -qxF "$o" <<< "$current"; then
+              echo "CORS already allows $o"
+            else
+              az functionapp cors add -g "$AZURE_RESOURCE_GROUP" -n "$FUNCTION_APP_NAME" --allowed-origins "$o" --output none
+              echo "Added CORS origin $o"
+            fi
+          done
+
+      - name: Deploy to Flex Consumption
+        uses: Azure/functions-action@v1
+        with:
+          app-name: ${{ vars.FUNCTION_APP_NAME }}
+          package: api.zip
+          sku: flexconsumption
+          remote-build: false
+
+      - name: Smoke test /api/v1/auth/config
+        shell: bash
+        run: |
+          set -euo pipefail
+          url="https://${FUNCTION_APP_NAME}.azurewebsites.net/api/v1/auth/config"
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            status=$(curl -sS -o body.json -w '%{http_code}' -D headers.txt "$url" || echo 000)
+            if [ "$status" = "200" ] && grep -qi '^content-type: *application/json' headers.txt && jq -e . body.json > /dev/null; then
+              echo "GET $url -> 200 JSON"
+              mode=$(jq -r '[.. | objects | (.mode // .Mode // empty)] | first // ""' body.json)
+              if [ "$mode" != "EntraId" ]; then
+                echo "::error::Auth mode is '$mode', expected 'EntraId'. Check the Auth__* application settings."
+                exit 1
+              fi
+              me=$(curl -sS -o /dev/null -w '%{http_code}' "https://${FUNCTION_APP_NAME}.azurewebsites.net/api/v1/me" || echo 000)
+              if [ "$me" != "401" ]; then
+                echo "::error::GET /api/v1/me without a token returned $me, expected 401."
+                exit 1
+              fi
+              echo "API deployed to **$TARGET_ENV**: \`$url\` returned JSON (auth mode $mode); \`/api/v1/me\` without a token returned 401." >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            echo "Attempt $attempt: HTTP $status; retrying in 15s..."
+            sleep 15
+          done
+          echo "::error::$url did not return JSON. Check the Function App logs in Application Insights."
+          head -c 500 body.json || true
+          exit 1

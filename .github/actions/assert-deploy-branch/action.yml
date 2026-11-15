@@ -1,0 +1,57 @@
+name: Assert deployment branch
+description: >
+  Fails unless the workflow runs from a branch that may deploy to the target environment.
+  dev: any branch (feature/**, develop, main, ...). test: develop, main, release/*. prod: main, release/*.
+  Mirror these rules in each GitHub environment's deployment branch policy; GitHub enforces
+  that policy even if a workflow file is edited on another branch.
+
+inputs:
+  environment:
+    description: Target environment (dev, test or prod).
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Check branch policy
+      shell: bash
+      env:
+        TARGET_ENV: ${{ inputs.environment }}
+        REF_TYPE: ${{ github.ref_type }}
+        REF_NAME: ${{ github.ref_name }}
+        COMMIT_SHA: ${{ github.sha }}
+      run: |
+        set -euo pipefail
+
+        if [ "$REF_TYPE" != "branch" ]; then
+          echo "::error::Deployments must run from a branch, not a $REF_TYPE ('$REF_NAME')."
+          exit 1
+        fi
+
+        allowed=false
+        case "$TARGET_ENV" in
+          dev)
+            allowed=true
+            rule="any branch"
+            ;;
+          test)
+            rule="develop, main, release/*"
+            case "$REF_NAME" in develop|main|release/*) allowed=true ;; esac
+            ;;
+          prod)
+            rule="main, release/*"
+            case "$REF_NAME" in main|release/*) allowed=true ;; esac
+            ;;
+          *)
+            echo "::error::Unknown environment '$TARGET_ENV'. Use dev, test or prod."
+            exit 1
+            ;;
+        esac
+
+        if [ "$allowed" != "true" ]; then
+          echo "::error::Branch '$REF_NAME' cannot deploy to '$TARGET_ENV'. Allowed: $rule."
+          exit 1
+        fi
+
+        echo "Branch '$REF_NAME' at $COMMIT_SHA may deploy to '$TARGET_ENV' (allowed: $rule)."
+        echo "Deploying \`$REF_NAME\` @ \`${COMMIT_SHA:0:12}\` to **$TARGET_ENV** (allowed: $rule)." >> "$GITHUB_STEP_SUMMARY"

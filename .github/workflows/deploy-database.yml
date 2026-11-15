@@ -1,0 +1,215 @@
+name: Deploy database
+
+# Manual only. Runs the numbered scripts in SBMRAS.Infrastructure/SQL (01_Tables.sql ... 12_SeedData.sql, then any
+# later NN_*.sql) with scripts/database/Invoke-SqlMigrations.ps1 against an existing Azure SQL database, tracked in
+# dbo.SchemaMigrationHistory.
+#   plan     - list what would run (default, read-only apart from creating the empty history table).
+#   baseline - one time only, for a database that was migrated by hand: verifies every table, procedure, view,
+#              function and column the scripts create already exists, then records the scripts as applied
+#              WITHOUT running them. Refused once dbo.SchemaMigrationHistory has entries.
+#   apply    - runs new or changed numbered scripts in order. Refuses to run on a database that has SBMRAS
+#              tables but no history (run baseline first) and never re-runs a script recorded by baseline.
+# Demo data: numbered scripts whose name contains "DemoData" or "SampleData" run only when include_demo_data is
+# checked (never in prod). 12_SeedData.sql (roles, permissions, menu, settings, lookups and the synthetic "(Demo)"
+# facilities/users from the SBMRAS contract section 5) always runs; review it before the first prod apply.
+# Runs the scripts from the commit selected in "Run workflow" (github.sha).
+# Connects as the dedicated migration user from the SQL_MIGRATION_CONNECTION_STRING environment secret
+# (see infra/README.md, "Migration user"). Azure login is used only to open a temporary SQL firewall rule for the
+# runner's IP, which is always removed at the end.
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment
+        type: choice
+        options:
+          - dev
+          - test
+          - prod
+        default: dev
+      mode:
+        description: plan (preview), baseline (one-time record of a hand-migrated schema; never re-runs scripts) or apply (new migrations only)
+        type: choice
+        options:
+          - plan
+          - baseline
+          - apply
+        default: plan
+      include_demo_data:
+        description: Include *DemoData*/*SampleData* numbered scripts (not allowed in prod)
+        type: boolean
+        default: false
+      admin_email:
+        description: Optional. Grant the Admin role to this sign-in email (apply mode only)
+        type: string
+        required: false
+      admin_display_name:
+        description: Optional. Display name used when the admin user is created
+        type: string
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-database-${{ inputs.environment }}
+  cancel-in-progress: false
+
+env:
+  GO_SQLCMD_VERSION: v1.10.0
+
+jobs:
+  branch-guard:
+    name: Branch policy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: ./.github/actions/assert-deploy-branch
+        with:
+          environment: ${{ inputs.environment }}
+
+  database:
+    name: Database ${{ inputs.mode }} (${{ inputs.environment }})
+    needs: branch-guard
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      TARGET_ENV: ${{ inputs.environment }}
+      MODE: ${{ inputs.mode }}
+      INCLUDE_DEMO_DATA: ${{ inputs.include_demo_data }}
+      ADMIN_EMAIL: ${{ inputs.admin_email }}
+      ADMIN_DISPLAY_NAME: ${{ inputs.admin_display_name }}
+      SQL_SERVER_RESOURCE_GROUP: ${{ vars.SQL_SERVER_RESOURCE_GROUP || vars.AZURE_RESOURCE_GROUP || (inputs.environment == 'dev' && 'rg-sbmras-dev' || '') }}
+      FIREWALL_RULE_NAME: github-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Validate inputs
+        shell: bash
+        env:
+          SQL_MIGRATION_CONNECTION_STRING: ${{ secrets.SQL_MIGRATION_CONNECTION_STRING }}
+        run: |
+          set -euo pipefail
+          fail() { echo "::error::$1"; exit 1; }
+          [ -n "${SQL_MIGRATION_CONNECTION_STRING:-}" ] || fail "Set the SQL_MIGRATION_CONNECTION_STRING secret on the '$TARGET_ENV' GitHub environment."
+          [ -n "${SQL_SERVER_RESOURCE_GROUP:-}" ] || fail "Set SQL_SERVER_RESOURCE_GROUP or AZURE_RESOURCE_GROUP on the '$TARGET_ENV' GitHub environment."
+          if [ "$TARGET_ENV" = "prod" ] && [ "$INCLUDE_DEMO_DATA" = "true" ]; then
+            fail "Demo data is not allowed in prod."
+          fi
+          if [ -n "$ADMIN_EMAIL" ]; then
+            [ "$MODE" = "apply" ] || fail "admin_email is only used with mode 'apply'."
+            [[ "$ADMIN_EMAIL" =~ ^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$ ]] || fail "admin_email is not a valid email address."
+          fi
+          if [ -n "$ADMIN_DISPLAY_NAME" ] && ! [[ "$ADMIN_DISPLAY_NAME" =~ ^[A-Za-z0-9\ .,_-]{1,100}$ ]]; then
+            fail "admin_display_name may contain letters, digits, spaces and . , _ - (max 100)."
+          fi
+
+      - name: Read SQL server from connection string
+        id: sql
+        shell: pwsh
+        env:
+          SQL_MIGRATION_CONNECTION_STRING: ${{ secrets.SQL_MIGRATION_CONNECTION_STRING }}
+        run: |
+          $builder = [System.Data.Common.DbConnectionStringBuilder]::new()
+          # PowerShell treats the builder as a dictionary; assigning .ConnectionString would add a key instead.
+          $builder.set_ConnectionString($env:SQL_MIGRATION_CONNECTION_STRING)
+          $serverKey = 'Server', 'Data Source', 'Address', 'Addr' | Where-Object { $builder.ContainsKey($_) } | Select-Object -First 1
+          $server = if ($serverKey) { [string]$builder[$serverKey] } else { '' }
+          $userKey = 'User ID', 'UID', 'User', 'UserID' | Where-Object { $builder.ContainsKey($_) } | Select-Object -First 1
+          $user = if ($userKey) { ([string]$builder[$userKey]).Trim() } else { '' }
+          if ($builder.ContainsKey('Password')) { Write-Host "::add-mask::$($builder['Password'])" }
+          if (-not $user) {
+            Write-Host "::error::SQL_MIGRATION_CONNECTION_STRING has no User ID. Update the secret in the '$env:TARGET_ENV' GitHub environment."
+            exit 1
+          }
+          if ($user -ine 'sbmras_migrator') {
+            Write-Host "::warning::SQL_MIGRATION_CONNECTION_STRING uses '$user' instead of the recommended dedicated user 'sbmras_migrator' (see infra/README.md, 'Migration user'). If login fails, the password in the '$env:TARGET_ENV' secret does not match this login."
+          }
+          $host_ = (($server -replace '^tcp:', '') -split ',')[0].Trim()
+          if ($host_ -notmatch '^([a-z0-9-]+)\.database\.windows\.net$') {
+            Write-Host "::error::Expected Server=tcp:<name>.database.windows.net,1433 in the connection string."
+            exit 1
+          }
+          "server_name=$($Matches[1])" >> $env:GITHUB_OUTPUT
+          "fqdn=$host_" >> $env:GITHUB_OUTPUT
+
+      - name: Install go-sqlcmd
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/sqlcmd"
+          curl -fsSL "https://github.com/microsoft/go-sqlcmd/releases/download/${GO_SQLCMD_VERSION}/sqlcmd-linux-amd64.tar.bz2" \
+            | tar -xj -C "$RUNNER_TEMP/sqlcmd"
+          "$RUNNER_TEMP/sqlcmd/sqlcmd" --version
+          echo "SQLCMD_PATH=$RUNNER_TEMP/sqlcmd/sqlcmd" >> "$GITHUB_ENV"
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v3
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Open temporary SQL firewall rule
+        shell: bash
+        env:
+          SQL_SERVER: ${{ steps.sql.outputs.server_name }}
+        run: |
+          set -euo pipefail
+          ip=$(curl -fsS https://api.ipify.org)
+          [[ "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::Could not determine the runner IP."; exit 1; }
+          az sql server firewall-rule create \
+            --resource-group "$SQL_SERVER_RESOURCE_GROUP" --server "$SQL_SERVER" \
+            --name "$FIREWALL_RULE_NAME" --start-ip-address "$ip" --end-ip-address "$ip" --output none
+          echo "Opened $FIREWALL_RULE_NAME for $ip on $SQL_SERVER."
+          # New rules can take a short while to take effect.
+          sleep 30
+
+      - name: Run migrations (${{ inputs.mode }})
+        shell: pwsh
+        env:
+          SQL_MIGRATION_CONNECTION_STRING: ${{ secrets.SQL_MIGRATION_CONNECTION_STRING }}
+        run: |
+          $mode = (Get-Culture).TextInfo.ToTitleCase($env:MODE)
+          ./scripts/database/Invoke-SqlMigrations.ps1 `
+            -ConnectionString $env:SQL_MIGRATION_CONNECTION_STRING `
+            -Mode $mode `
+            -IncludeDemoData:($env:INCLUDE_DEMO_DATA -eq 'true') `
+            -SqlCmd $env:SQLCMD_PATH `
+            -CodePageArgs @()
+
+      - name: Provision named administrator
+        if: ${{ inputs.mode == 'apply' && inputs.admin_email != '' }}
+        shell: pwsh
+        env:
+          SQL_MIGRATION_CONNECTION_STRING: ${{ secrets.SQL_MIGRATION_CONNECTION_STRING }}
+        run: |
+          $displayName = if ($env:ADMIN_DISPLAY_NAME) { $env:ADMIN_DISPLAY_NAME } else { ($env:ADMIN_EMAIL -split '@')[0] }
+          ./scripts/database/Invoke-SqlScript.ps1 `
+            -ConnectionString $env:SQL_MIGRATION_CONNECTION_STRING `
+            -Path SBMRAS.Infrastructure/SQL/Deployment/ProvisionAdmin.sql `
+            -Variables @{ AdminEmail = $env:ADMIN_EMAIL; AdminDisplayName = $displayName } `
+            -SqlCmd $env:SQLCMD_PATH `
+            -CodePageArgs @()
+          "Admin role granted to ``$env:ADMIN_EMAIL``." >> $env:GITHUB_STEP_SUMMARY
+
+      - name: Remove temporary SQL firewall rule
+        if: ${{ always() && steps.sql.outputs.server_name != '' }}
+        shell: bash
+        env:
+          SQL_SERVER: ${{ steps.sql.outputs.server_name }}
+        run: |
+          az sql server firewall-rule delete \
+            --resource-group "$SQL_SERVER_RESOURCE_GROUP" --server "$SQL_SERVER" \
+            --name "$FIREWALL_RULE_NAME" --output none 2>/dev/null \
+            && echo "Removed $FIREWALL_RULE_NAME." \
+            || echo "::warning::Could not remove firewall rule $FIREWALL_RULE_NAME (it may not exist). Check the SQL server networking settings."

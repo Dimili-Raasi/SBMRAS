@@ -1,0 +1,128 @@
+<div class="sb-dialog-head">
+  <mat-icon class="head-icon">{{ isNew ? 'add_business' : 'apartment' }}</mat-icon>
+  <div class="grow">
+    <h2 mat-dialog-title>{{ isNew ? 'Register facility' : facility!.name }}</h2>
+    <div class="muted small">
+      @if (isNew) {
+        New facilities start as <strong>Pending</strong> until verified.
+      } @else {
+        <span class="mono">{{ facility!.facilityCode }}</span> · {{ facility!.verificationStatus }}
+      }
+    </div>
+  </div>
+  <button mat-icon-button type="button" aria-label="Close" (click)="close()"><mat-icon>close</mat-icon></button>
+</div>
+@if (saving()) {
+  <mat-progress-bar mode="indeterminate" />
+}
+<form [formGroup]="form" (ngSubmit)="save()" novalidate>
+  <mat-dialog-content>
+    <div class="sb-form-grid">
+      @if (formError()) {
+        <div class="sb-form-error span-2" role="alert">
+          <mat-icon>error</mat-icon>
+          <span class="grow">{{ formError() }}</span>
+          @if (conflict()) {
+            <button mat-stroked-button type="button" (click)="reloadLatest()">Reload latest</button>
+          }
+        </div>
+      }
+      <mat-form-field appearance="outline">
+        <mat-label>Facility type</mat-label>
+        <mat-select formControlName="facilityType" required>
+          <mat-option value="Hospital">Hospital</mat-option>
+          <mat-option value="BloodBank">Blood bank</mat-option>
+        </mat-select>
+        @if (!isNew) {
+          <mat-hint>Cannot change once inventory has been recorded.</mat-hint>
+        }
+      </mat-form-field>
+      <mat-form-field appearance="outline">
+        <mat-label>Licence number</mat-label>
+        <input matInput formControlName="licenseNo" maxlength="60" class="mono" />
+      </mat-form-field>
+      <mat-form-field appearance="outline" class="span-2">
+        <mat-label>Name</mat-label>
+        <input matInput formControlName="name" required maxlength="200" />
+        @if (form.controls.name.hasError('required')) {
+          <mat-error>Name is required.</mat-error>
+        }
+      </mat-form-field>
+      <mat-form-field appearance="outline" class="span-2">
+        <mat-label>Address</mat-label>
+        <input matInput formControlName="addressLine" required maxlength="300" />
+        @if (form.controls.addressLine.hasError('required')) {
+          <mat-error>Address is required.</mat-error>
+        }
+      </mat-form-field>
+      <mat-form-field appearance="outline">
+        <mat-label>Area</mat-label>
+        <mat-select formControlName="areaId" required>
+          @for (a of areas(); track a.areaId) {
+            <mat-option [value]="a.areaId">{{ a.name }} · {{ a.city }}</mat-option>
+          }
+        </mat-select>
+        @if (form.controls.areaId.hasError('required')) {
+          <mat-error>Select an area.</mat-error>
+        }
+      </mat-form-field>
+      <mat-form-field appearance="outline">
+        <mat-label>City</mat-label>
+        <input matInput formControlName="city" maxlength="100" />
+        <mat-hint>Defaults to the area's city.</mat-hint>
+      </mat-form-field>
+      <mat-form-field appearance="outline">
+        <mat-label>PIN code</mat-label>
+        <input matInput formControlName="pincode" maxlength="6" inputmode="numeric" class="mono" />
+        @if (form.controls.pincode.hasError('pattern')) {
+          <mat-error>Enter a 6-digit PIN code.</mat-error>
+        }
+      </mat-form-field>
+      <div class="sb-inline-pair">
+        <mat-form-field appearance="outline">
+          <mat-label>Latitude</mat-label>
+          <input matInput type="number" step="0.000001" formControlName="latitude" class="mono" />
+          @if (form.controls.latitude.invalid) {
+            <mat-error>−90 to 90</mat-error>
+          }
+        </mat-form-field>
+        <mat-form-field appearance="outline">
+          <mat-label>Longitude</mat-label>
+          <input matInput type="number" step="0.000001" formControlName="longitude" class="mono" />
+          @if (form.controls.longitude.invalid) {
+            <mat-error>−180 to 180</mat-error>
+          }
+        </mat-form-field>
+      </div>
+      <mat-form-field appearance="outline">
+        <mat-label>Contact phone</mat-label>
+        <input matInput formControlName="contactPhone" required maxlength="30" class="mono" />
+        @if (form.controls.contactPhone.hasError('required')) {
+          <mat-error>Contact phone is required.</mat-error>
+        } @else if (form.controls.contactPhone.hasError('pattern')) {
+          <mat-error>Use digits, spaces, +, ( ) or -.</mat-error>
+        }
+      </mat-form-field>
+      <mat-form-field appearance="outline">
+        <mat-label>Contact e-mail</mat-label>
+        <input matInput type="email" formControlName="contactEmail" maxlength="320" />
+        @if (form.controls.contactEmail.hasError('email')) {
+          <mat-error>Enter a valid e-mail address.</mat-error>
+        }
+      </mat-form-field>
+      <div class="sb-toggle-row span-2">
+        <mat-slide-toggle formControlName="is24x7">Open 24×7</mat-slide-toggle>
+        @if (!isNew) {
+          <mat-slide-toggle formControlName="isActive">Active</mat-slide-toggle>
+        }
+      </div>
+    </div>
+  </mat-dialog-content>
+  <mat-dialog-actions align="end">
+    <button mat-button type="button" (click)="close()">Cancel</button>
+    <button mat-flat-button color="primary" type="submit" [disabled]="saving() || (!isNew && form.pristine)">
+      <mat-icon>save</mat-icon>
+      {{ isNew ? 'Register' : 'Save changes' }}
+    </button>
+  </mat-dialog-actions>
+</form>

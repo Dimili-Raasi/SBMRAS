@@ -1,0 +1,246 @@
+<sb-page-header
+  title="New Blood Request"
+  subtitle="Raise a coordination request. Facilities will review and contact you — SBMRAS does not reserve or guarantee stock."
+  icon="add_circle"
+>
+  <a mat-stroked-button routerLink="/requests">
+    <mat-icon>arrow_back</mat-icon>
+    My requests
+  </a>
+</sb-page-header>
+
+@switch (state()) {
+  @case ('loading') {
+    <sb-state-panel state="loading" message="Loading form…" />
+  }
+  @case ('error') {
+    <sb-state-panel state="error" [message]="loadError()" (retry)="loadLookups()" />
+  }
+  @default {
+    @let lk = lookups();
+    <form class="sb-rf" [formGroup]="form" (ngSubmit)="submit()" novalidate>
+      @if (serverError()) {
+        <div class="sb-rf-banner" role="alert">
+          <mat-icon>error</mat-icon>
+          <div>
+            <strong>{{ serverError() }}</strong>
+            @if (serverErrors().length) {
+              <ul>
+                @for (e of serverErrors(); track $index) {
+                  <li>{{ e }}</li>
+                }
+              </ul>
+            }
+          </div>
+        </div>
+      }
+
+      <section class="sb-rf-card">
+        <h2><mat-icon>bloodtype</mat-icon> Blood needed</h2>
+
+        <div class="sb-rf-label" id="bg-label">Blood group (ABO / Rh) <span class="req">*</span></div>
+        <div class="sb-rf-groups" role="radiogroup" aria-labelledby="bg-label">
+          @for (g of bloodGroups; track g.aboGroup + g.rhFactor) {
+            <button
+              type="button"
+              role="radio"
+              class="sb-rf-group"
+              [class.selected]="isSelected(g)"
+              [attr.aria-checked]="isSelected(g)"
+              (click)="pickGroup(g)"
+            >
+              <sb-blood-group-tile [aboGroup]="g.aboGroup" [rhFactor]="g.rhFactor" size="md" />
+            </button>
+          }
+        </div>
+        @if (bloodGroupInvalid()) {
+          <div class="sb-rf-error">Select the ABO group and Rh factor.</div>
+        }
+
+        <div class="row g-3 mt-1">
+          <div class="col-12 col-md-6">
+            <mat-form-field appearance="outline" class="w-100">
+              <mat-label>Component</mat-label>
+              <mat-select formControlName="componentId" required>
+                @for (c of lk?.components ?? []; track c.componentId) {
+                  <mat-option [value]="c.componentId">{{ c.name }} ({{ c.code }})</mat-option>
+                }
+              </mat-select>
+              @if (form.controls.componentId.hasError('required')) {
+                <mat-error>Select a blood component.</mat-error>
+              }
+            </mat-form-field>
+          </div>
+          <div class="col-6 col-md-3">
+            <mat-form-field appearance="outline" class="w-100">
+              <mat-label>Quantity</mat-label>
+              <input
+                matInput
+                type="number"
+                inputmode="decimal"
+                formControlName="quantityRequested"
+                min="0.01"
+                [max]="maxQuantity"
+                step="1"
+                required
+              />
+              @if (form.controls.quantityRequested.hasError('required')) {
+                <mat-error>Enter the quantity needed.</mat-error>
+              } @else if (form.controls.quantityRequested.hasError('min')) {
+                <mat-error>Quantity must be greater than 0.</mat-error>
+              } @else if (form.controls.quantityRequested.hasError('max')) {
+                <mat-error>Maximum {{ maxQuantity }} per request.</mat-error>
+              }
+            </mat-form-field>
+          </div>
+          <div class="col-6 col-md-3">
+            <mat-form-field appearance="outline" class="w-100">
+              <mat-label>Unit</mat-label>
+              <mat-select formControlName="unitId" required>
+                @for (u of lk?.units ?? []; track u.unitId) {
+                  <mat-option [value]="u.unitId">{{ u.name }} ({{ u.code }})</mat-option>
+                }
+              </mat-select>
+              @if (form.controls.unitId.hasError('required')) {
+                <mat-error>Select a unit.</mat-error>
+              }
+            </mat-form-field>
+          </div>
+        </div>
+
+        <div class="sb-rf-label" id="urg-label">Urgency <span class="req">*</span></div>
+        <mat-button-toggle-group
+          formControlName="urgency"
+          aria-labelledby="urg-label"
+          class="sb-rf-urgency"
+          hideSingleSelectionIndicator
+        >
+          @for (u of urgencies; track u) {
+            <mat-button-toggle [value]="u"><sb-urgency-badge [urgency]="u" /></mat-button-toggle>
+          }
+        </mat-button-toggle-group>
+
+        <div class="row g-3 mt-2">
+          <div class="col-12 col-md-6">
+            <mat-form-field appearance="outline" class="w-100">
+              <mat-label>Needed by</mat-label>
+              <input matInput type="datetime-local" formControlName="neededBy" [min]="minNeededBy" required />
+              <mat-hint>Your local time</mat-hint>
+              @if (form.controls.neededBy.hasError('required')) {
+                <mat-error>Enter when the blood is needed.</mat-error>
+              } @else if (form.controls.neededBy.hasError('notFuture')) {
+                <mat-error>Needed-by must be in the future.</mat-error>
+              } @else if (form.controls.neededBy.hasError('invalidDate')) {
+                <mat-error>Enter a valid date and time.</mat-error>
+              }
+            </mat-form-field>
+          </div>
+          <div class="col-12 col-md-6">
+            <mat-form-field appearance="outline" class="w-100">
+              <mat-label>Patient reference (optional)</mat-label>
+              <input matInput formControlName="patientReference" maxlength="50" />
+              <mat-hint>An alias or ward/bed reference only — do not enter patient names or IDs.</mat-hint>
+              @if (form.controls.patientReference.hasError('maxlength')) {
+                <mat-error>Maximum 50 characters.</mat-error>
+              }
+            </mat-form-field>
+          </div>
+        </div>
+      </section>
+
+      <section class="sb-rf-card">
+        <h2><mat-icon>local_hospital</mat-icon> Where</h2>
+        <div class="row g-3">
+          <div class="col-12 col-md-4">
+            <mat-form-field appearance="outline" class="w-100">
+              <mat-label>Area</mat-label>
+              <mat-select formControlName="areaId" required>
+                @for (a of lk?.areas ?? []; track a.areaId) {
+                  <mat-option [value]="a.areaId">{{ a.name }}, {{ a.city }}</mat-option>
+                }
+              </mat-select>
+              @if (form.controls.areaId.hasError('required')) {
+                <mat-error>Select the area.</mat-error>
+              }
+            </mat-form-field>
+          </div>
+          <div class="col-12 col-md-8">
+            <mat-form-field appearance="outline" class="w-100">
+              <mat-label>Hospital (where the patient is admitted)</mat-label>
+              <input matInput formControlName="hospitalName" maxlength="200" required />
+              @if (form.controls.hospitalName.hasError('required')) {
+                <mat-error>Enter the hospital name.</mat-error>
+              } @else if (form.controls.hospitalName.hasError('maxlength')) {
+                <mat-error>Maximum 200 characters.</mat-error>
+              }
+            </mat-form-field>
+          </div>
+        </div>
+        @if (preferredFacilityName()) {
+          <div class="sb-rf-preferred">
+            <mat-icon>pin_drop</mat-icon>
+            <span>Preferred facility: <strong>{{ preferredFacilityName() }}</strong></span>
+            <button mat-button type="button" (click)="clearPreferredFacility()">
+              <mat-icon>close</mat-icon>
+              Remove
+            </button>
+          </div>
+        }
+      </section>
+
+      <section class="sb-rf-card">
+        <h2><mat-icon>contact_phone</mat-icon> Contact</h2>
+        <div class="row g-3">
+          <div class="col-12 col-md-6">
+            <mat-form-field appearance="outline" class="w-100">
+              <mat-label>Contact name</mat-label>
+              <input matInput formControlName="contactName" maxlength="150" autocomplete="name" required />
+              @if (form.controls.contactName.hasError('required')) {
+                <mat-error>Enter a contact name.</mat-error>
+              } @else if (form.controls.contactName.hasError('maxlength')) {
+                <mat-error>Maximum 150 characters.</mat-error>
+              }
+            </mat-form-field>
+          </div>
+          <div class="col-12 col-md-6">
+            <mat-form-field appearance="outline" class="w-100">
+              <mat-label>Contact phone</mat-label>
+              <input matInput type="tel" formControlName="contactPhone" maxlength="20" autocomplete="tel" required />
+              @if (form.controls.contactPhone.hasError('required')) {
+                <mat-error>Enter a contact phone number.</mat-error>
+              } @else if (form.controls.contactPhone.invalid) {
+                <mat-error>Enter a valid phone number (digits, spaces, dashes, optional +).</mat-error>
+              }
+            </mat-form-field>
+          </div>
+          <div class="col-12">
+            <mat-form-field appearance="outline" class="w-100">
+              <mat-label>Notes for coordinators (optional)</mat-label>
+              <textarea matInput formControlName="notes" rows="3" maxlength="1000"></textarea>
+              <mat-hint align="end">{{ form.controls.notes.value.length }} / 1000</mat-hint>
+            </mat-form-field>
+          </div>
+        </div>
+        <mat-checkbox formControlName="contactConsent" class="sb-rf-consent">
+          I consent to authorised hospital and blood-bank coordinators seeing my contact details to coordinate this
+          request.
+        </mat-checkbox>
+        @if (form.controls.contactConsent.invalid && form.controls.contactConsent.touched) {
+          <div class="sb-rf-error">Consent is required to submit a request.</div>
+        }
+      </section>
+
+      <div class="sb-rf-actions">
+        <a mat-button routerLink="/requests">Cancel</a>
+        <button mat-flat-button color="primary" type="submit" [disabled]="saving()">
+          @if (saving()) {
+            <mat-progress-spinner mode="indeterminate" diameter="18" />
+          } @else {
+            <mat-icon>send</mat-icon>
+          }
+          Submit request
+        </button>
+      </div>
+    </form>
+  }
+}

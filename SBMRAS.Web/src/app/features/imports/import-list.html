@@ -1,0 +1,100 @@
+<sb-page-header
+  title="Bulk Import"
+  subtitle="Stage CSV files of blood stock or resource availability, review row-level validation, then commit."
+  icon="upload_file"
+>
+  <a mat-flat-button color="primary" routerLink="/imports/new">
+    <mat-icon>add</mat-icon>
+    New import
+  </a>
+</sb-page-header>
+
+<section class="sb-card imp-filters">
+  <mat-form-field appearance="outline" subscriptSizing="dynamic">
+    <mat-label>Facility</mat-label>
+    <mat-select [(ngModel)]="facilityId" (selectionChange)="applyFilters()">
+      <mat-option [value]="null">All my facilities</mat-option>
+      @for (f of facilities(); track f.facilityId) {
+        <mat-option [value]="f.facilityId">{{ f.name }} ({{ f.facilityCode }})</mat-option>
+      }
+    </mat-select>
+  </mat-form-field>
+  <mat-form-field appearance="outline" subscriptSizing="dynamic">
+    <mat-label>Status</mat-label>
+    <mat-select [(ngModel)]="status" (selectionChange)="applyFilters()">
+      <mat-option [value]="null">Any status</mat-option>
+      @for (s of statuses; track s) {
+        <mat-option [value]="s">{{ s }}</mat-option>
+      }
+    </mat-select>
+  </mat-form-field>
+  <span class="flex-spacer"></span>
+  <button mat-stroked-button type="button" (click)="load()" [disabled]="state() === 'loading'">
+    <mat-icon>refresh</mat-icon>
+    Refresh
+  </button>
+</section>
+
+@switch (state()) {
+  @case ('loading') {
+    <sb-state-panel state="loading" message="Loading import batches…" />
+  }
+  @case ('error') {
+    <sb-state-panel state="error" [message]="error()" (retry)="load()" />
+  }
+  @case ('empty') {
+    <sb-state-panel state="empty" message="No import batches match these filters. Start a new import to upload a CSV." />
+  }
+  @default {
+    <section class="sb-card imp-table-card">
+      <div class="table-responsive">
+        <table class="sb-table">
+          <thead>
+            <tr>
+              <th>Batch</th>
+              <th>Facility</th>
+              <th>Kind</th>
+              <th>File</th>
+              <th class="num">Rows</th>
+              <th class="num">Valid</th>
+              <th class="num">Invalid</th>
+              <th class="num">Duplicate</th>
+              <th class="num">Review</th>
+              <th class="num">Applied</th>
+              <th>Status</th>
+              <th>Submitted</th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (b of batches(); track b.batchId) {
+              <tr>
+                <td><a class="mono" [routerLink]="['/imports', b.batchId]">{{ b.batchNo }}</a></td>
+                <td>{{ b.facilityName }}</td>
+                <td>{{ b.inventoryKind }}</td>
+                <td class="imp-file" [matTooltip]="b.fileName">{{ b.fileName }}</td>
+                <td class="num mono">{{ count(b.totalRows) }}</td>
+                <td class="num mono ok">{{ count(b.validRows) }}</td>
+                <td class="num mono bad">{{ count(b.invalidRows) }}</td>
+                <td class="num mono warn">{{ count(b.duplicateRows) }}</td>
+                <td class="num mono review">{{ count(b.reviewRows) }}</td>
+                <td class="num mono">{{ count(b.appliedRows) }}</td>
+                <td><span [class]="statusClass(b.status)">{{ b.status }}</span></td>
+                <td>
+                  <div>{{ b.submittedAt ? (b.submittedAt | date: 'dd MMM yyyy, HH:mm') : 'Not reported' }}</div>
+                  <small class="muted">{{ b.submittedByName || '' }}</small>
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+      <mat-paginator
+        [length]="total()"
+        [pageIndex]="page - 1"
+        [pageSize]="pageSize"
+        [pageSizeOptions]="[10, 20, 50]"
+        (page)="onPage($event)"
+      />
+    </section>
+  }
+}

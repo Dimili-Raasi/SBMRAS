@@ -1,0 +1,47 @@
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700;800&display=swap');
+
+:root {
+  color-scheme: light;
+  --sb-navy: #0b1f33;
+  --sb-primary: #c8102e;
+  --sb-primary-dark: #8e0c21;
+  --sb-teal: #00897b;
+  --sb-amber: #f2a900;
+  --sb-blue: #1e6fd9;
+  --sb-success: #2e9e5b;
+  --sb-danger: #d93025;
+  --sb-bg: #f3f6f9;
+  --sb-surface: #fff;
+  --sb-border: #dce3ea;
+  --sb-text: #14212e;
+  --sb-muted: #5b6b7b;
+  --mat-sys-primary: #c8102e;
+  --mat-sys-on-primary: #ffffff;
+  --mat-sys-tertiary: #00897b;
+  --mat-sys-on-tertiary: #ffffff;
+  font-family: Inter, Arial, sans-serif;
+  background: var(--sb-bg);
+}
+
+* { box-sizing: border-box; }
+html, body { min-height: 100%; margin: 0; background: var(--sb-bg); color: var(--sb-text); }
+body { font-family: Inter, Arial, sans-serif; font-size: 14px; }
+button, input, select, textarea { font: inherit; }
+a { color: inherit; }
+.mono, code, .reference-number { font-family: 'IBM Plex Mono', monospace; }
+.sb-snackbar-success { --mdc-snackbar-container-color: #176f40; }
+.sb-snackbar-error { --mdc-snackbar-container-color: #a50c25; }
+
+mat-form-field { width: 100%; }
+mat-spinner { --mdc-circular-progress-active-indicator-color: var(--sb-primary); }
+.mat-mdc-unelevated-button.mat-primary, .mat-mdc-raised-button.mat-primary {
+  --mdc-filled-button-container-color: var(--sb-primary);
+  --mdc-filled-button-label-text-color: #fff;
+}
+.mat-mdc-outlined-button.mat-primary { --mdc-outlined-button-outline-color: var(--sb-primary); --mdc-outlined-button-label-text-color: var(--sb-primary); }
+.mat-mdc-button.mat-primary { --mdc-text-button-label-text-color: var(--sb-primary); }
+.mat-mdc-progress-spinner { --mdc-circular-progress-active-indicator-color: var(--sb-primary); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
+}

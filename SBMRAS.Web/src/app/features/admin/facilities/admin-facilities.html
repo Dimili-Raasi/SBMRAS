@@ -1,0 +1,142 @@
+<sb-page-header
+  title="Facility Verification"
+  subtitle="Register hospitals and blood banks, maintain registry details and control their verification lifecycle."
+  icon="domain_verification"
+>
+  <button mat-flat-button color="primary" type="button" *sbHasPermission="P.FacilitiesVerify" (click)="open(null)">
+    <mat-icon>add_business</mat-icon>
+    Register facility
+  </button>
+</sb-page-header>
+
+<section class="sb-admin-card">
+  <form class="sb-admin-filters" [formGroup]="filters" (submit)="$event.preventDefault()">
+    <mat-form-field appearance="outline" subscriptSizing="dynamic" class="grow">
+      <mat-label>Search</mat-label>
+      <mat-icon matPrefix>search</mat-icon>
+      <input matInput formControlName="search" placeholder="Name, code, licence, city or area" maxlength="200" />
+    </mat-form-field>
+    <mat-form-field appearance="outline" subscriptSizing="dynamic">
+      <mat-label>Status</mat-label>
+      <mat-select formControlName="status">
+        <mat-option value="">All statuses</mat-option>
+        @for (s of statuses; track s) {
+          <mat-option [value]="s">{{ s }}</mat-option>
+        }
+      </mat-select>
+    </mat-form-field>
+    <mat-form-field appearance="outline" subscriptSizing="dynamic">
+      <mat-label>Type</mat-label>
+      <mat-select formControlName="facilityType">
+        <mat-option value="">All types</mat-option>
+        <mat-option value="Hospital">Hospital</mat-option>
+        <mat-option value="BloodBank">Blood bank</mat-option>
+      </mat-select>
+    </mat-form-field>
+    <button mat-stroked-button type="button" (click)="clearFilters()">
+      <mat-icon>filter_alt_off</mat-icon>
+      Clear
+    </button>
+  </form>
+
+  @switch (state()) {
+    @case ('loading') {
+      <sb-state-panel state="loading" message="Loading facilities…" />
+    }
+    @case ('error') {
+      <sb-state-panel state="error" [message]="error()" (retry)="reload()" />
+    }
+    @case ('empty') {
+      <sb-state-panel state="empty" message="No facilities match the selected filters." />
+    }
+    @default {
+      <div class="sb-admin-table-wrap">
+        <table class="sb-admin-table">
+          <thead>
+            <tr>
+              <th>Facility</th>
+              <th>Type</th>
+              <th>Location</th>
+              <th>Contact</th>
+              <th>Verification</th>
+              <th class="num">Quality</th>
+              <th class="num">Users</th>
+              <th class="actions"><span class="visually-hidden">Actions</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (f of facilities(); track f.facilityId) {
+              <tr [class.inactive]="!f.isActive">
+                <td>
+                  <button type="button" class="sb-link" (click)="open(f)">{{ f.name }}</button>
+                  <div class="mono muted small">{{ f.facilityCode }} · Lic {{ f.licenseNo || '—' }}</div>
+                </td>
+                <td>
+                  <span class="sb-type-chip" [attr.data-type]="f.facilityType">
+                    <mat-icon inline>{{ f.facilityType === 'BloodBank' ? 'water_drop' : 'local_hospital' }}</mat-icon>
+                    {{ f.facilityType === 'BloodBank' ? 'Blood bank' : 'Hospital' }}
+                  </span>
+                  @if (f.is24x7) {
+                    <div class="muted small">24×7</div>
+                  }
+                </td>
+                <td>
+                  <div>{{ f.areaName || '—' }}</div>
+                  <div class="muted small">{{ f.city }} {{ f.pincode }}</div>
+                </td>
+                <td class="small">
+                  <div class="mono">{{ f.contactPhone }}</div>
+                  <div class="muted">{{ f.contactEmail || '' }}</div>
+                </td>
+                <td>
+                  <span class="sb-status-pill" [attr.data-tone]="statusTone(f.verificationStatus)">{{ f.verificationStatus }}</span>
+                  @if (!f.isActive) {
+                    <span class="sb-active-pill off ms-1">Inactive</span>
+                  }
+                  @if (f.verifiedAt) {
+                    <div class="muted small">{{ f.verifiedAt | date: 'dd MMM yyyy' }}{{ f.verifiedByName ? ' · ' + f.verifiedByName : '' }}</div>
+                  }
+                  @if (f.verificationNotes) {
+                    <div class="muted small notes" [title]="f.verificationNotes">{{ f.verificationNotes }}</div>
+                  }
+                </td>
+                <td class="num mono">
+                  {{ f.qualityScore === null || f.qualityScore === undefined ? 'Not reported' : (f.qualityScore | number: '1.0-0') }}
+                </td>
+                <td class="num mono">{{ f.assignedUsers ?? 0 }}</td>
+                <td class="actions">
+                  <ng-container *sbHasPermission="P.FacilitiesVerify">
+                    @for (d of decisionsFor(f); track d) {
+                      <button
+                        mat-stroked-button
+                        type="button"
+                        class="compact-btn"
+                        [class.danger]="decisionMeta[d].danger"
+                        [disabled]="busyId() === f.facilityId"
+                        (click)="decide(f, d)"
+                      >
+                        <mat-icon>{{ decisionMeta[d].icon }}</mat-icon>
+                        {{ decisionMeta[d].label }}
+                      </button>
+                    }
+                    <button mat-icon-button type="button" matTooltip="Edit registry details" (click)="open(f)">
+                      <mat-icon>edit</mat-icon>
+                    </button>
+                  </ng-container>
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+      <mat-paginator
+        [length]="total()"
+        [pageIndex]="page() - 1"
+        [pageSize]="pageSize()"
+        [pageSizeOptions]="[10, 20, 50, 100]"
+        (page)="onPage($event)"
+        showFirstLastButtons
+      />
+    }
+  }
+</section>
