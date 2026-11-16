@@ -68,8 +68,9 @@ jobs:
           test -f "$PUBLISH_DIR/SBMRAS.API.dll" || { echo "::error::SBMRAS.API.dll is not at the publish root."; exit 1; }
           rm -f "$PUBLISH_DIR/local.settings.json" "$PUBLISH_DIR/local.settings.sample.json"
           (cd "$PUBLISH_DIR" && zip -qr "$GITHUB_WORKSPACE/api.zip" .)
-          unzip -l api.zip | awk '{print $4}' | grep -qx 'host.json' || { echo "::error::host.json is not at the zip root."; exit 1; }
-          if unzip -l api.zip | awk '{print $4}' | grep -q 'local.settings.json'; then
+          unzip -Z1 api.zip > zip-entries.txt
+          grep -qx 'host.json' zip-entries.txt || { echo "::error::host.json is not at the zip root."; exit 1; }
+          if grep -q 'local.settings.json' zip-entries.txt; then
             echo "::error::local.settings.json must not be deployed."; exit 1
           fi
           echo "Package OK: $(du -h api.zip | cut -f1), host.json at root."
