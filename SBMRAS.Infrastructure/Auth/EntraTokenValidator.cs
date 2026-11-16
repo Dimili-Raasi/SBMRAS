@@ -68,7 +68,8 @@ public sealed class EntraTokenValidator
             ClockSkew = TimeSpan.FromMinutes(2),
         };
 
-        var principal = new JwtSecurityTokenHandler().ValidateToken(token, parameters, out _);
+        // Keep raw JWT claim names (tid, oid, scp, roles); the default mapping renames them to long URIs.
+        var principal = new JwtSecurityTokenHandler { MapInboundClaims = false }.ValidateToken(token, parameters, out _);
         var tokenTenant = GetClaim(principal, "tid");
         if (!Guid.TryParse(tokenTenant, out var actualTenant) || actualTenant != tenantId)
             throw new SecurityTokenValidationException("The token tenant is not authorized.");
