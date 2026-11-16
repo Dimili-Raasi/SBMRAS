@@ -1365,7 +1365,7 @@ Deployments authenticate to Azure with **OIDC federated credentials** (`azure/lo
 | `AZURE_TENANT_ID` | Environment | Azure (workforce) tenant ID hosting the subscription | No | all deploy workflows |
 | `AZURE_SUBSCRIPTION_ID` | Environment | `<subscription-id>` | No | all deploy workflows |
 | `AZURE_RESOURCE_GROUP` | Environment | `rg-sbmras-dev` | No | infra, database, api |
-| `AZURE_LOCATION` | Repository | `centralindia` | No | infra |
+| `AZURE_LOCATION` | Repository | `indiasouthcentral` | No | infra |
 | `FUNCTION_APP_NAME` | Environment | `sbmras-func-dev` | No | api, web |
 | `WEB_APP_NAME` | Environment | `sbmras-web-dev` | No | web |
 | `RUNTIME_IDENTITY_CLIENT_ID` | Environment | client ID of `sbmras-id-dev` | No | api (SQL MI connection string) |

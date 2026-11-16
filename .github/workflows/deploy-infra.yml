@@ -56,7 +56,7 @@ jobs:
     env:
       TARGET_ENV: ${{ inputs.environment }}
       AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP || (inputs.environment == 'dev' && 'rg-sbmras-dev' || '') }}
-      AZURE_LOCATION: ${{ vars.AZURE_LOCATION || 'centralindia' }}
+      AZURE_LOCATION: ${{ vars.AZURE_LOCATION || 'indiasouthcentral' }}
       SQL_SERVER_NAME: ${{ vars.SQL_SERVER_NAME || (inputs.environment == 'dev' && 'sbmras-sql-dev' || '') }}
       SQL_DATABASE_NAME: ${{ vars.SQL_DATABASE_NAME || (inputs.environment == 'dev' && 'SBMRAS' || '') }}
       SQL_SERVER_RESOURCE_GROUP: ${{ vars.SQL_SERVER_RESOURCE_GROUP }}
@@ -125,6 +125,12 @@ jobs:
             state=$(az provider show --namespace "$ns" --query registrationState -o tsv 2>/dev/null || echo Unknown)
             [ "$state" = "Registered" ] || az provider register --namespace "$ns" --wait --output none || echo "::warning::Could not register $ns."
           done
+          # Fail fast with a clear message instead of a late Bicep error when the region has no Flex Consumption capacity.
+          rg_location=$(az group show --name "$AZURE_RESOURCE_GROUP" --query location -o tsv)
+          if ! az functionapp list-flexconsumption-locations --query "[].name" -o tsv | tr -d ' ' | tr '[:upper:]' '[:lower:]' | grep -qx "$rg_location"; then
+            echo "::error::Flex Consumption is not available in '$rg_location'. Use another region (e.g. eastasia): set AZURE_LOCATION and use a new AZURE_RESOURCE_GROUP, or delete the existing one."
+            exit 1
+          fi
 
       - name: Stage 1 - foundation
         id: foundation

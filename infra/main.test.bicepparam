@@ -3,7 +3,7 @@ using './main.bicep'
 // Tenant-specific values come from the test GitHub environment variables (see infra/README.md).
 // readEnvironmentVariable() fails the deployment when a variable without a default is missing.
 param environmentName = 'test'
-param location = readEnvironmentVariable('AZURE_LOCATION', 'centralindia')
+param location = readEnvironmentVariable('AZURE_LOCATION', 'indiasouthcentral')
 // Keep in sync with foundation.test.bicepparam (stage 1 creates the identity and host storage with these names).
 param namePrefix = 'sbmras'
 
