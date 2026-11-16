@@ -57,7 +57,8 @@ public sealed class EntraTokenValidator
             ValidateIssuerSigningKey = true,
             IssuerSigningKeys = metadata.SigningKeys,
             ValidateIssuer = true,
-            ValidIssuer = metadata.Issuer,
+            // The API app registration may issue v1.0 access tokens, whose issuer omits the "/v2.0" suffix.
+            ValidIssuers = ValidIssuersFor(metadata.Issuer),
             ValidateAudience = true,
             ValidAudiences = validAudiences,
             ValidateLifetime = true,
@@ -71,7 +72,9 @@ public sealed class EntraTokenValidator
         var tokenTenant = GetClaim(principal, "tid");
         if (!Guid.TryParse(tokenTenant, out var actualTenant) || actualTenant != tenantId)
             throw new SecurityTokenValidationException("The token tenant is not authorized.");
-        var tokenFlow = GetClaim(principal, "tfp") ?? GetClaim(principal, "acr");
+        // B2C reports the user flow in tfp (or acr on older tokens); External ID uses acr for the auth context level ("1").
+        var acr = GetClaim(principal, "acr");
+        var tokenFlow = GetClaim(principal, "tfp") ?? (acr is not null && acr.Contains('_') ? acr : null);
         if (tokenFlow is not null && !string.Equals(tokenFlow, userFlow, StringComparison.OrdinalIgnoreCase))
             throw new SecurityTokenValidationException("The token was issued by a different sign-up/sign-in user flow.");
 
@@ -145,6 +148,13 @@ public sealed class EntraTokenValidator
             return $"{instance}/{tenantDomain}/{escapedFlow}/v2.0/.well-known/openid-configuration?p={escapedFlow}";
 
         return $"{instance}/{tenant}/v2.0/.well-known/openid-configuration";
+    }
+
+    private static string[] ValidIssuersFor(string metadataIssuer)
+    {
+        var issuer = metadataIssuer.TrimEnd('/');
+        var v1Issuer = issuer.EndsWith("/v2.0", StringComparison.OrdinalIgnoreCase) ? issuer[..^"/v2.0".Length] : issuer;
+        return [issuer, issuer + "/", v1Issuer, v1Issuer + "/"];
     }
 
     private static string? GetClaim(ClaimsPrincipal principal, string type)
