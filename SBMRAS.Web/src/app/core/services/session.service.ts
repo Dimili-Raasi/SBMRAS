@@ -30,24 +30,27 @@ export class SessionService {
   async load(force = false): Promise<CurrentUser | null> {
     if (!force && this.currentUser()) return this.currentUser();
     if (this.loading) return this.loading;
+    this.loading = this.fetchUser().finally(() => {
+      this.loading = null;
+    });
+    return this.loading;
+  }
+
+  private async fetchUser(): Promise<CurrentUser | null> {
+    // Guards run in parallel; MSAL must finish handling the redirect before the account is known.
+    await this.auth.initialize();
     if (!this.auth.isAuthenticated) {
       this.currentUser.set(null);
       return null;
     }
-
-    this.loading = firstValueFrom(this.api.get<CurrentUser>('me'))
-      .then((user) => {
-        this.currentUser.set(user);
-        return user;
-      })
-      .catch(() => {
-        this.currentUser.set(null);
-        return null;
-      })
-      .finally(() => {
-        this.loading = null;
-      });
-    return this.loading;
+    try {
+      const user = await firstValueFrom(this.api.get<CurrentUser>('me'));
+      this.currentUser.set(user);
+      return user;
+    } catch {
+      this.currentUser.set(null);
+      return null;
+    }
   }
 
   setUser(user: CurrentUser | null): void {
