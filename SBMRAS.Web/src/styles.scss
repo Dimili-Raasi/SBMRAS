@@ -17,7 +17,21 @@
   --mat-sys-on-primary: #ffffff;
   --mat-sys-tertiary: #00897b;
   --mat-sys-on-tertiary: #ffffff;
-  font-family: Inter, Arial, sans-serif;
+  --sb-font: Inter, Arial, sans-serif;
+  --mat-sys-body-large-font: var(--sb-font);
+  --mat-sys-body-medium-font: var(--sb-font);
+  --mat-sys-body-small-font: var(--sb-font);
+  --mat-sys-label-large-font: var(--sb-font);
+  --mat-sys-label-medium-font: var(--sb-font);
+  --mat-sys-label-small-font: var(--sb-font);
+  --mat-sys-title-large-font: var(--sb-font);
+  --mat-sys-title-medium-font: var(--sb-font);
+  --mat-sys-title-small-font: var(--sb-font);
+  --mat-sys-headline-small-font: var(--sb-font);
+  --mat-sys-headline-medium-font: var(--sb-font);
+  --mat-sys-headline-large-font: var(--sb-font);
+  --mat-sys-display-small-font: var(--sb-font);
+  font-family: var(--sb-font);
   background: var(--sb-bg);
 }
 
