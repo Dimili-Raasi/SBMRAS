@@ -1,0 +1,11 @@
+﻿bin/
+obj/
+**/local.settings.json
+node_modules/
+.angular/
+dist/
+scripts/database/.work/
+.devops-tmp/
+*.user
+TestResults/
+.vs/

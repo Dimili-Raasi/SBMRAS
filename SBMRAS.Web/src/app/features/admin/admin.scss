@@ -1,0 +1,190 @@
+// Admin screens — "Clinical Science" theme (contract §7.1). Falls back to palette hex when global tokens are absent.
+:host {
+  display: block;
+  --adm-ink: var(--sb-ink, #0b1f33);
+  --adm-primary: var(--sb-primary, #c8102e);
+  --adm-primary-dark: var(--sb-primary-dark, #8e0c21);
+  --adm-teal: var(--sb-secondary, #00897b);
+  --adm-amber: var(--sb-accent, #f2a900);
+  --adm-info: var(--sb-info, #1e6fd9);
+  --adm-success: var(--sb-success, #2e9e5b);
+  --adm-danger: var(--sb-danger, #d93025);
+  --adm-surface: var(--sb-surface, #ffffff);
+  --adm-border: var(--sb-border, #dce3ea);
+  --adm-text: var(--sb-text, #14212e);
+  --adm-muted: var(--sb-muted, #5b6b7b);
+  --adm-mono: var(--sb-font-mono, 'IBM Plex Mono', ui-monospace, monospace);
+  color: var(--adm-text);
+}
+
+.grow { flex: 1 1 auto; min-width: 0; }
+.muted { color: var(--adm-muted); }
+.small { font-size: 0.8125rem; }
+.xsmall { font-size: 0.72rem; }
+.mono { font-family: var(--adm-mono); }
+.num { text-align: right; }
+.center { text-align: center; }
+.warn-text { color: #9a6b00; }
+.visually-hidden { position: absolute !important; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+
+.sb-admin-card {
+  background: var(--adm-surface);
+  border: 1px solid var(--adm-border);
+  border-radius: 10px;
+  box-shadow: 0 1px 2px rgba(11, 31, 51, 0.04), 0 4px 12px rgba(11, 31, 51, 0.04);
+  padding: 16px;
+  margin-bottom: 16px;
+}
+
+.sb-admin-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 12px;
+  mat-form-field:not(.grow) { width: 190px; }
+  .grow { min-width: 240px; }
+}
+
+.sb-admin-table-wrap { overflow-x: auto; }
+.sb-admin-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+  th, td { padding: 8px 10px; border-bottom: 1px solid var(--adm-border); vertical-align: top; text-align: left; }
+  th.num, td.num { text-align: right; }
+  th.center, td.center { text-align: center; }
+  thead th {
+    position: sticky; top: 0; z-index: 1;
+    background: #f3f6f9; color: var(--adm-muted);
+    font-size: 0.72rem; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase;
+  }
+  tbody tr:hover { background: #f8fafc; }
+  tr.inactive td { color: var(--adm-muted); }
+  td.actions { white-space: nowrap; text-align: right; }
+  td.actions .compact-btn { margin-right: 4px; min-height: 32px; height: 32px; }
+  .notes { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+}
+
+.sb-link {
+  background: none; border: 0; padding: 0; cursor: pointer;
+  color: var(--adm-ink); font-weight: 600; text-align: left;
+  &:hover, &:focus-visible { color: var(--adm-primary); text-decoration: underline; }
+}
+
+.sb-chip-row { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+
+.sb-role-chip {
+  display: inline-flex; align-items: center;
+  padding: 1px 8px; border-radius: 999px; font-size: 0.72rem; font-weight: 600;
+  border: 1px solid var(--adm-border); background: #f3f6f9; color: var(--adm-ink);
+  &[data-role='Admin'] { background: rgba(200, 16, 46, 0.08); border-color: rgba(200, 16, 46, 0.35); color: var(--adm-primary-dark); }
+  &[data-role='HospitalManagement'] { background: rgba(30, 111, 217, 0.08); border-color: rgba(30, 111, 217, 0.35); color: #164f9c; }
+  &[data-role='BloodBank'] { background: rgba(0, 137, 123, 0.08); border-color: rgba(0, 137, 123, 0.35); color: #00695f; }
+}
+
+.sb-source-badge {
+  display: inline-flex; align-items: center; gap: 3px;
+  padding: 0 6px; border-radius: 4px; font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em;
+  font-family: var(--adm-mono);
+  &.entra { background: rgba(30, 111, 217, 0.1); color: var(--adm-info); }
+  &.local { background: rgba(91, 107, 123, 0.12); color: var(--adm-muted); }
+}
+
+.sb-active-pill, .sb-status-pill, .sb-type-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 1px 8px; border-radius: 999px; font-size: 0.72rem; font-weight: 600;
+}
+.sb-active-pill { background: rgba(46, 158, 91, 0.12); color: #1f7a45; &.off { background: rgba(138, 150, 163, 0.18); color: var(--adm-muted); } }
+.sb-status-pill {
+  &[data-tone='ok'] { background: rgba(46, 158, 91, 0.12); color: #1f7a45; }
+  &[data-tone='info'] { background: rgba(30, 111, 217, 0.1); color: var(--adm-info); }
+  &[data-tone='warn'] { background: rgba(242, 169, 0, 0.16); color: #8a5f00; }
+  &[data-tone='bad'] { background: rgba(217, 48, 37, 0.1); color: var(--adm-danger); }
+}
+.sb-type-chip {
+  border: 1px solid var(--adm-border);
+  &[data-type='BloodBank'] { color: var(--adm-primary); border-color: rgba(200, 16, 46, 0.35); }
+  &[data-type='Hospital'] { color: var(--adm-info); border-color: rgba(30, 111, 217, 0.35); }
+}
+
+button.danger { color: var(--adm-danger) !important; border-color: rgba(217, 48, 37, 0.45) !important; }
+
+// Dialogs & forms
+.sb-dialog-head {
+  display: flex; align-items: flex-start; gap: 12px; padding: 16px 16px 0 24px;
+  h2[mat-dialog-title] { padding: 0; margin: 0; font-size: 1.15rem; }
+  .head-icon {
+    color: #fff; background: var(--adm-primary); border-radius: 50%;
+    width: 36px; height: 36px; font-size: 20px; display: inline-flex; align-items: center; justify-content: center; flex: none;
+  }
+}
+
+.sb-form-grid {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 16px;
+  .span-2 { grid-column: 1 / -1; }
+  @media (max-width: 640px) { grid-template-columns: 1fr; }
+}
+.sb-inline-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.sb-toggle-row { display: flex; gap: 24px; flex-wrap: wrap; padding: 4px 0 8px; }
+
+.sb-form-error {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 12px; margin-bottom: 12px; border-radius: 8px;
+  background: rgba(217, 48, 37, 0.08); border: 1px solid rgba(217, 48, 37, 0.3); color: #a3241b; font-size: 0.875rem;
+}
+
+.sb-dialog-form-actions { display: flex; align-items: center; gap: 8px; padding: 12px 0 4px; }
+
+.sb-role-fieldset {
+  border: 1px solid var(--adm-border); border-radius: 10px; padding: 12px 16px; margin: 4px 0 8px;
+  legend { font-weight: 600; font-size: 0.875rem; padding: 0 6px; }
+}
+.sb-role-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; @media (max-width: 640px) { grid-template-columns: 1fr; } }
+.sb-role-option {
+  display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;
+  border: 1px solid var(--adm-border); border-radius: 8px; padding: 6px 8px;
+  &.held { border-color: rgba(200, 16, 46, 0.35); background: rgba(200, 16, 46, 0.03); }
+}
+
+.sb-assign-row {
+  display: flex; gap: 12px; align-items: center; margin-bottom: 10px; flex-wrap: wrap;
+  .role-col { width: 180px; }
+}
+
+// Roles
+.sb-role-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px; }
+.sb-role-card {
+  margin-bottom: 0; border-top: 3px solid var(--adm-ink);
+  &[data-role='Admin'] { border-top-color: var(--adm-primary); }
+  &[data-role='HospitalManagement'] { border-top-color: var(--adm-info); }
+  &[data-role='BloodBank'] { border-top-color: var(--adm-teal); }
+  header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+}
+.sb-meta {
+  display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; margin: 0; font-size: 0.8rem;
+  dt { color: var(--adm-muted); } dd { margin: 0; text-align: right; }
+}
+.sb-role-cards + .sb-admin-card { margin-top: 16px; }
+.sb-matrix {
+  .matrix-head { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+  .group-row th { background: rgba(11, 31, 51, 0.04); color: var(--adm-ink); text-transform: uppercase; font-size: 0.72rem; letter-spacing: 0.05em; }
+  td.changed { background: rgba(242, 169, 0, 0.16); }
+}
+.changed-swatch { display: inline-block; width: 12px; height: 12px; border-radius: 3px; background: rgba(242, 169, 0, 0.35); vertical-align: middle; margin-right: 4px; }
+
+// Settings
+.sb-settings-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 16px; @media (max-width: 520px) { grid-template-columns: 1fr; } }
+.sb-settings-group { margin-bottom: 0; }
+.sb-settings-head {
+  display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;
+  h3 { margin: 0; font-size: 1rem; font-weight: 600; color: var(--adm-ink); }
+}
+.sb-setting-row {
+  display: flex; gap: 12px; justify-content: space-between; align-items: center;
+  padding: 10px 8px; border-top: 1px solid var(--adm-border);
+  border-left: 3px solid transparent;
+  &.changed { border-left-color: var(--adm-amber); background: rgba(242, 169, 0, 0.06); }
+}
+.sb-setting-label { flex: 1 1 auto; min-width: 0; }
+.sb-setting-input { flex: 0 0 200px; mat-form-field { width: 100%; } }

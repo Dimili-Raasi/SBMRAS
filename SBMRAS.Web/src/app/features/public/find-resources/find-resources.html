@@ -1,0 +1,147 @@
+<sb-page-header
+  title="Find medical resources"
+  subtitle="Discover reported equipment, capacity and supplies at verified hospitals. Contact facilities to reconfirm availability."
+  icon="medical_services"
+>
+  <button mat-stroked-button type="button" (click)="reload()" aria-label="Refresh medical resources">
+    <mat-icon>refresh</mat-icon> Refresh
+  </button>
+</sb-page-header>
+
+<section class="resource-search">
+  <form class="filter-grid" [formGroup]="filters" (submit)="$event.preventDefault()">
+    <mat-form-field appearance="outline" subscriptSizing="dynamic" class="search-field">
+      <mat-label>Resource, facility or city</mat-label>
+      <mat-icon matPrefix>search</mat-icon>
+      <input matInput formControlName="search" maxlength="100" />
+    </mat-form-field>
+    <mat-form-field appearance="outline" subscriptSizing="dynamic">
+      <mat-label>Category</mat-label>
+      <mat-select formControlName="categoryId">
+        <mat-option [value]="null">Any category</mat-option>
+        @for (category of categories(); track category.categoryId) {
+          <mat-option [value]="category.categoryId">{{ category.name }}</mat-option>
+        }
+      </mat-select>
+    </mat-form-field>
+    <mat-form-field appearance="outline" subscriptSizing="dynamic">
+      <mat-label>Resource type</mat-label>
+      <mat-select formControlName="resourceTypeId">
+        <mat-option [value]="null">Any resource</mat-option>
+        @for (type of filteredResourceTypes(); track type.resourceTypeId) {
+          <mat-option [value]="type.resourceTypeId">{{ type.name }}</mat-option>
+        }
+      </mat-select>
+    </mat-form-field>
+    <mat-form-field appearance="outline" subscriptSizing="dynamic">
+      <mat-label>Area</mat-label>
+      <mat-select formControlName="areaId">
+        <mat-option [value]="null">All areas</mat-option>
+        @for (area of areas(); track area.areaId) {
+          <mat-option [value]="area.areaId">{{ area.name }} · {{ area.city }}</mat-option>
+        }
+      </mat-select>
+    </mat-form-field>
+    <mat-checkbox class="filter-toggle" formControlName="availableOnly">Available or limited only</mat-checkbox>
+    <mat-checkbox class="filter-toggle" formControlName="freshOnly">Fresh records only</mat-checkbox>
+    @if (hasFilters()) {
+      <button mat-button class="clear-filter" type="button" (click)="clearFilters()">
+        <mat-icon>filter_alt_off</mat-icon> Clear filters
+      </button>
+    }
+  </form>
+
+  @switch (state()) {
+    @case ('loading') {
+      <sb-state-panel state="loading" message="Searching medical resources…" />
+    }
+    @case ('error') {
+      <sb-state-panel state="error" [message]="error()" (retry)="reload()" />
+    }
+    @case ('empty') {
+      <sb-state-panel
+        state="empty"
+        [message]="hasFilters() ? 'No resources match these filters. Try broadening your search.' : 'No medical-resource availability has been reported yet.'"
+      />
+    }
+    @default {
+      <div class="result-heading" aria-live="polite">
+        <p><strong>{{ total() }}</strong> reported resource{{ total() === 1 ? '' : 's' }}</p>
+        <span>Reported availability can change; please contact the facility.</span>
+      </div>
+      <div class="resource-grid" aria-label="Medical resource search results">
+        @for (item of items(); track item.resourceInventoryId) {
+          <article class="resource-card">
+            <header class="resource-heading">
+              <span class="resource-icon"><mat-icon>medical_services</mat-icon></span>
+              <div class="resource-heading__copy">
+                <p class="category">{{ item.categoryName || 'Medical resource' }}</p>
+                <h2>{{ item.resourceTypeName || 'Resource not reported' }}</h2>
+                <span class="resource-code">{{ item.resourceTypeCode || 'Code not reported' }}</span>
+              </div>
+              @if (item.operationalStatus) {
+                <sb-status-chip [status]="item.operationalStatus" />
+              }
+            </header>
+            <div class="resource-numbers">
+              <div>
+                <span>Available</span>
+                @if (item.availableQuantity !== null && item.availableQuantity !== undefined) {
+                  <strong class="mono">{{ item.availableQuantity | sbQty }} {{ item.unitCode || '' }}</strong>
+                } @else {
+                  <strong class="not-reported">Not reported</strong>
+                }
+              </div>
+              <div class="total-number">
+                <span>Total capacity</span>
+                @if (item.totalQuantity !== null && item.totalQuantity !== undefined) {
+                  <strong class="mono">{{ item.totalQuantity | sbQty }} {{ item.unitCode || '' }}</strong>
+                } @else {
+                  <strong class="not-reported">Not reported</strong>
+                }
+              </div>
+            </div>
+            <div class="resource-facility">
+              <mat-icon>domain</mat-icon>
+              <div>
+                <h3>{{ item.facilityName || 'Facility not reported' }}</h3>
+                <p>{{ item.areaName || 'Area not reported' }}@if (item.city) { · {{ item.city }} }</p>
+              </div>
+            </div>
+            <div class="resource-meta">
+              <sb-freshness-badge
+                [status]="item.freshnessStatus"
+                [lastUpdatedAt]="item.lastUpdatedAt"
+                [validUntil]="item.validUntil"
+              />
+              @if (item.verificationStatus) {
+                <span class="verification-label"><mat-icon>verified</mat-icon> {{ item.verificationStatus }}</span>
+              }
+            </div>
+            @if (item.notes) { <p class="resource-note">{{ item.notes }}</p> }
+            <footer class="resource-footer">
+              @if (item.is24x7) { <span class="hours"><mat-icon>schedule</mat-icon> Open 24/7</span> }
+              @if (item.contactPhone) {
+                <a mat-stroked-button [href]="'tel:' + item.contactPhone">
+                  <mat-icon>call</mat-icon> Contact facility
+                </a>
+              } @else {
+                <button mat-stroked-button type="button" (click)="contactFacility(item)">
+                  <mat-icon>domain</mat-icon> View facility
+                </button>
+              }
+            </footer>
+          </article>
+        }
+      </div>
+      <mat-paginator
+        [length]="total()"
+        [pageIndex]="page() - 1"
+        [pageSize]="pageSize()"
+        [pageSizeOptions]="[12, 24, 48]"
+        (page)="onPage($event)"
+        aria-label="Medical resource result pages"
+      />
+    }
+  }
+</section>

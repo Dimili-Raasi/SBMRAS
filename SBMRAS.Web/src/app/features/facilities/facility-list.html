@@ -1,0 +1,50 @@
+<sb-page-header title="My Facilities" subtitle="Review facility profiles, reporting freshness, and data quality." icon="apartment" />
+
+<section class="filters" aria-label="Facility filters">
+  <mat-form-field appearance="outline">
+    <mat-label>Search facilities</mat-label>
+    <input matInput [formControl]="search" placeholder="Name, code, city or license" />
+    <mat-icon matSuffix>search</mat-icon>
+  </mat-form-field>
+  <mat-form-field appearance="outline">
+    <mat-label>Facility type</mat-label>
+    <mat-select [formControl]="facilityType">
+      <mat-option value="">All facility types</mat-option>
+      <mat-option value="Hospital">Hospitals</mat-option>
+      <mat-option value="BloodBank">Blood banks</mat-option>
+    </mat-select>
+  </mat-form-field>
+</section>
+
+@if (state() !== 'ready') {
+  <sb-state-panel [state]="panelState()"
+    [message]="state() === 'error' ? error() : 'No facilities are assigned to your account yet.'"
+    (retry)="reload()" />
+} @else {
+  <section class="facility-list" aria-label="Facilities">
+    @for (facility of facilities(); track facility.facilityId) {
+      <article class="facility-card">
+        <div class="facility-main">
+          <div class="facility-title">
+            <span class="facility-icon"><mat-icon>{{ facility.facilityType === 'BloodBank' ? 'bloodtype' : 'local_hospital' }}</mat-icon></span>
+            <div>
+              <a [routerLink]="['/facilities', facility.facilityId]">{{ facility.name }}</a>
+              <p><span class="mono">{{ facility.facilityCode }}</span> · {{ facility.facilityType === 'BloodBank' ? 'Blood bank' : 'Hospital' }}</p>
+            </div>
+          </div>
+          <sb-status-chip [status]="facility.verificationStatus" />
+        </div>
+        <div class="facility-meta">
+          <span><mat-icon>location_on</mat-icon>{{ facility.city || 'Location not reported' }}<span *ngIf="facility.areaName">, {{ facility.areaName }}</span></span>
+          <span><mat-icon>schedule</mat-icon>Updated {{ facility.lastUpdateAt ? (facility.lastUpdateAt | date:'medium') : 'Not reported' }}</span>
+          <div class="quality"><span>Quality</span><sb-quality-gauge [score]="facility.qualityScore" /></div>
+        </div>
+        <a mat-stroked-button color="primary" [routerLink]="['/facilities', facility.facilityId]">
+          View facility <mat-icon>arrow_forward</mat-icon>
+        </a>
+      </article>
+    }
+  </section>
+  <mat-paginator [length]="total()" [pageIndex]="page() - 1" [pageSize]="pageSize()"
+    [pageSizeOptions]="[10, 20, 50]" (page)="onPage($event)" aria-label="Facility pages" />
+}

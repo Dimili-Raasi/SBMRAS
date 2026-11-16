@@ -1,0 +1,256 @@
+<sb-page-header
+  title="Data Quality"
+  subtitle="Trust score from completeness, recency, verification and anomalies — with the issues behind it."
+  icon="verified"
+>
+  <button mat-stroked-button type="button" (click)="reloadAll()">
+    <mat-icon>refresh</mat-icon>
+    Refresh
+  </button>
+  <button mat-flat-button color="primary" type="button" (click)="scan()" [disabled]="scanning()">
+    @if (scanning()) {
+      <mat-spinner diameter="18" class="d-inline-block me-1" />
+    } @else {
+      <mat-icon>radar</mat-icon>
+    }
+    Run quality scan
+  </button>
+</sb-page-header>
+
+<section class="sb-card filters">
+  <mat-form-field appearance="outline" subscriptSizing="dynamic">
+    <mat-label>Facility</mat-label>
+    <mat-select [(ngModel)]="facilityId" (selectionChange)="onFacilityChange()">
+      <mat-option [value]="null">All my facilities</mat-option>
+      @for (f of facilityOptions(); track f.facilityId) {
+        <mat-option [value]="f.facilityId">{{ f.facilityName }}</mat-option>
+      }
+    </mat-select>
+  </mat-form-field>
+  <span class="muted small align-self-center">
+    The scan checks stale records, expiring units and missing values for the selected scope.
+  </span>
+</section>
+
+@switch (summaryState()) {
+  @case ('loading') {
+    <sb-state-panel state="loading" message="Calculating quality scores…" />
+  }
+  @case ('error') {
+    <sb-state-panel state="error" [message]="summaryError()" (retry)="loadSummary()" />
+  }
+  @case ('empty') {
+    <sb-state-panel state="empty" message="No facilities in scope have reported inventory yet." />
+  }
+  @default {
+    <div class="row g-3 mb-3">
+      <div class="col-lg-4">
+        <section class="sb-card h-100 overall">
+          <h2 class="card-title">Overall quality</h2>
+          @if (overall(); as o) {
+            <sb-quality-gauge [score]="o.qualityScore" />
+            <dl class="components">
+              <div><dt>Completeness</dt><dd [class]="scoreTone(o.completenessScore)">{{ score(o.completenessScore) }}</dd></div>
+              <div><dt>Recency</dt><dd [class]="scoreTone(o.recencyScore)">{{ score(o.recencyScore) }}</dd></div>
+              <div><dt>Verification</dt><dd [class]="scoreTone(o.verificationScore)">{{ score(o.verificationScore) }}</dd></div>
+              <div><dt>Anomaly</dt><dd [class]="scoreTone(o.anomalyScore)">{{ score(o.anomalyScore) }}</dd></div>
+            </dl>
+            <p class="muted small mb-0">Open issues: <span class="mono">{{ n(o.openIssues) }}</span></p>
+          } @else {
+            <p class="muted">Not reported</p>
+          }
+        </section>
+      </div>
+      <div class="col-lg-8">
+        <section class="sb-card h-100">
+          <h2 class="card-title">Freshness breakdown</h2>
+          @if (hasFreshnessData(overall())) {
+            <div class="fresh-bar" role="img" aria-label="Freshness breakdown of inventory records">
+              @for (s of freshness(); track s.key) {
+                @if (s.pct > 0) {
+                  <span [style.width.%]="s.pct" [style.background]="s.color" [matTooltip]="s.label + ': ' + s.value"></span>
+                }
+              }
+            </div>
+            <ul class="legend">
+              @for (s of freshness(); track s.key) {
+                <li>
+                  <span class="dot" [style.background]="s.color"></span>
+                  {{ s.label }}
+                  <span class="mono">{{ n(s.value) }}</span>
+                  @if (s.value !== null) { <span class="muted">({{ s.pct | number: '1.0-0' }}%)</span> }
+                </li>
+              }
+            </ul>
+          } @else {
+            <p class="muted">Not reported — no inventory records in scope.</p>
+          }
+        </section>
+      </div>
+    </div>
+
+    <section class="sb-card p-0 mb-3">
+      <h2 class="card-title px-3 pt-3">Facilities (lowest score first)</h2>
+      @if (facilities().length) {
+        <div class="table-responsive">
+          <table class="sb-table">
+            <thead>
+              <tr>
+                <th>Facility</th>
+                <th class="num">Score</th>
+                <th class="num">Completeness</th>
+                <th class="num">Recency</th>
+                <th class="num">Verification</th>
+                <th class="num">Anomaly</th>
+                <th>Freshness</th>
+                <th class="num">Open issues</th>
+                <th>Last update</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (f of facilities(); track f.facilityId) {
+                <tr>
+                  <td>
+                    <div class="fw-semibold">{{ f.facilityName }}</div>
+                    <small class="muted">{{ f.facilityType === 'BloodBank' ? 'Blood bank' : 'Hospital' }}</small>
+                  </td>
+                  <td class="num"><span class="score-pill" [class]="scoreTone(f.qualityScore)">{{ score(f.qualityScore) }}</span></td>
+                  <td class="num mono">{{ score(f.completenessScore) }}</td>
+                  <td class="num mono">{{ score(f.recencyScore) }}</td>
+                  <td class="num mono">{{ score(f.verificationScore) }}</td>
+                  <td class="num mono">{{ score(f.anomalyScore) }}</td>
+                  <td class="fresh-cell">
+                    @if (hasFreshnessData(f)) {
+                      <div class="fresh-bar fresh-bar--mini">
+                        @for (s of segments(f); track s.key) {
+                          @if (s.pct > 0) {
+                            <span [style.width.%]="s.pct" [style.background]="s.color" [matTooltip]="s.label + ': ' + s.value"></span>
+                          }
+                        }
+                      </div>
+                    } @else {
+                      <span class="muted small">Not reported</span>
+                    }
+                  </td>
+                  <td class="num mono">{{ n(f.openIssues) }}</td>
+                  <td>{{ f.lastUpdateAt ? (f.lastUpdateAt | date: 'dd MMM, HH:mm') : 'Not reported' }}</td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      } @else {
+        <p class="muted px-3 pb-3">No facilities in scope.</p>
+      }
+    </section>
+  }
+}
+
+<section class="sb-card">
+  <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+    <h2 class="card-title mb-0 me-auto">Validation issues</h2>
+    <mat-form-field appearance="outline" subscriptSizing="dynamic">
+      <mat-label>Status</mat-label>
+      <mat-select [(ngModel)]="status" (selectionChange)="applyIssueFilters()">
+        <mat-option [value]="null">Any</mat-option>
+        @for (s of issueStatuses; track s) { <mat-option [value]="s">{{ s }}</mat-option> }
+      </mat-select>
+    </mat-form-field>
+    <mat-form-field appearance="outline" subscriptSizing="dynamic">
+      <mat-label>Severity</mat-label>
+      <mat-select [(ngModel)]="severity" (selectionChange)="applyIssueFilters()">
+        <mat-option [value]="null">Any</mat-option>
+        @for (s of severities; track s) { <mat-option [value]="s">{{ s }}</mat-option> }
+      </mat-select>
+    </mat-form-field>
+    <mat-form-field appearance="outline" subscriptSizing="dynamic">
+      <mat-label>Issue type</mat-label>
+      <mat-select [(ngModel)]="issueCode" (selectionChange)="applyIssueFilters()">
+        <mat-option [value]="null">Any</mat-option>
+        @for (c of issueCodes; track c) { <mat-option [value]="c">{{ c }}</mat-option> }
+      </mat-select>
+    </mat-form-field>
+  </div>
+
+  @switch (issueState()) {
+    @case ('loading') {
+      <sb-state-panel state="loading" message="Loading issues…" />
+    }
+    @case ('error') {
+      <sb-state-panel state="error" [message]="issueError()" (retry)="loadIssues()" />
+    }
+    @case ('empty') {
+      <sb-state-panel state="empty" message="No validation issues match these filters." />
+    }
+    @default {
+      <div class="table-responsive">
+        <table class="sb-table">
+          <thead>
+            <tr>
+              <th>Issue</th>
+              <th>Severity</th>
+              <th>Facility / record</th>
+              <th>Message</th>
+              <th>Detected</th>
+              <th>Status</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (i of issues(); track i.issueId) {
+              <tr>
+                <td><span class="code mono">{{ i.issueCode }}</span></td>
+                <td><span [class]="'sev sev--' + (i.severity || '').toLowerCase()">{{ i.severity }}</span></td>
+                <td>
+                  <div>{{ i.facilityName }}</div>
+                  <small class="muted mono">{{ i.entityType }} #{{ i.entityId }}</small>
+                </td>
+                <td>
+                  {{ i.message }}
+                  @if (i.observedValue) { <div class="muted small">Observed: <span class="mono">{{ i.observedValue }}</span></div> }
+                  @if (i.resolution) {
+                    <div class="muted small">
+                      {{ i.status }}{{ i.resolvedByName ? ' by ' + i.resolvedByName : '' }}:
+                      {{ i.resolution }}
+                    </div>
+                  }
+                </td>
+                <td>{{ i.detectedAt | date: 'dd MMM, HH:mm' }}</td>
+                <td><span [class]="'ist ist--' + (i.status || '').toLowerCase()">{{ i.status }}</span></td>
+                <td class="text-end text-nowrap">
+                  @if (i.status === 'Open') {
+                    <button
+                      mat-button
+                      type="button"
+                      [disabled]="busyIssueId() === i.issueId"
+                      (click)="resolve(i, true)"
+                      matTooltip="Not a real problem"
+                    >
+                      Dismiss
+                    </button>
+                    <button
+                      mat-stroked-button
+                      color="primary"
+                      type="button"
+                      [disabled]="busyIssueId() === i.issueId"
+                      (click)="resolve(i, false)"
+                    >
+                      <mat-icon>task_alt</mat-icon> Resolve
+                    </button>
+                  }
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+      <mat-paginator
+        [length]="issueTotal()"
+        [pageIndex]="page - 1"
+        [pageSize]="pageSize"
+        [pageSizeOptions]="[10, 20, 50]"
+        (page)="onPage($event)"
+      />
+    }
+  }
+</section>

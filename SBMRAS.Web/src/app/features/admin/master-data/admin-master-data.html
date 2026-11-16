@@ -1,0 +1,99 @@
+<sb-page-header
+  title="Master Data"
+  subtitle="Reference catalogues used by search, inventory, requests and imports. Deactivate instead of deleting to keep history intact."
+  icon="dataset"
+>
+  <button mat-flat-button color="primary" type="button" *sbHasPermission="P.MasterDataManage" (click)="open(null)">
+    <mat-icon>add</mat-icon>
+    Add {{ config().singular }}
+  </button>
+</sb-page-header>
+
+<section class="sb-admin-card">
+  <mat-tab-group [selectedIndex]="index()" (selectedIndexChange)="selectTab($event)" animationDuration="0ms" mat-stretch-tabs="false">
+    @for (t of types; track t.type) {
+      <mat-tab>
+        <ng-template mat-tab-label>
+          <mat-icon class="me-1">{{ t.icon }}</mat-icon>
+          {{ t.label }}
+        </ng-template>
+      </mat-tab>
+    }
+  </mat-tab-group>
+
+  <div class="sb-admin-filters mt-3">
+    <mat-form-field appearance="outline" subscriptSizing="dynamic" class="grow">
+      <mat-label>Filter {{ config().label | lowercase }}</mat-label>
+      <mat-icon matPrefix>search</mat-icon>
+      <input matInput [formControl]="search" />
+    </mat-form-field>
+    <mat-form-field appearance="outline" subscriptSizing="dynamic">
+      <mat-label>Status</mat-label>
+      <mat-select [formControl]="activeFilter">
+        <mat-option value="all">All</mat-option>
+        <mat-option value="active">Active</mat-option>
+        <mat-option value="inactive">Inactive</mat-option>
+      </mat-select>
+    </mat-form-field>
+  </div>
+
+  @switch (state()) {
+    @case ('loading') {
+      <sb-state-panel state="loading" [message]="'Loading ' + (config().label | lowercase) + '…'" />
+    }
+    @case ('error') {
+      <sb-state-panel state="error" [message]="error()" (retry)="load()" />
+    }
+    @case ('empty') {
+      <sb-state-panel state="empty" [message]="'No ' + (config().label | lowercase) + ' defined yet.'" />
+    }
+    @default {
+      @if (!filtered().length) {
+        <sb-state-panel state="empty" message="No rows match the filter." />
+      } @else {
+        <div class="sb-admin-table-wrap">
+          <table class="sb-admin-table">
+            <thead>
+              <tr>
+                @for (c of config().columns; track c.key) {
+                  <th [class.num]="c.num">{{ c.label }}</th>
+                }
+                <th>Status</th>
+                <th class="actions"><span class="visually-hidden">Actions</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (r of filtered(); track r.id) {
+                <tr [class.inactive]="!r.isActive">
+                  @for (c of config().columns; track c.key) {
+                    <td [class.mono]="c.mono" [class.num]="c.num">{{ cell(r, c.key) }}</td>
+                  }
+                  <td>
+                    <span class="sb-active-pill" [class.off]="!r.isActive">{{ r.isActive ? 'Active' : 'Inactive' }}</span>
+                  </td>
+                  <td class="actions">
+                    <ng-container *sbHasPermission="P.MasterDataManage">
+                      <button mat-icon-button type="button" matTooltip="Edit" (click)="open(r)">
+                        <mat-icon>edit</mat-icon>
+                      </button>
+                      <button
+                        mat-icon-button
+                        type="button"
+                        [matTooltip]="r.isActive ? 'Deactivate' : 'Activate'"
+                        [disabled]="busyId() === r.id"
+                        (click)="toggleActive(r)"
+                      >
+                        <mat-icon>{{ r.isActive ? 'toggle_on' : 'toggle_off' }}</mat-icon>
+                      </button>
+                    </ng-container>
+                  </td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+        <p class="muted small mt-2">{{ filtered().length }} of {{ rows().length }} {{ config().label | lowercase }}</p>
+      }
+    }
+  }
+</section>

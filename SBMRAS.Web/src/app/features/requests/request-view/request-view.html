@@ -1,0 +1,301 @@
+@switch (state()) {
+  @case ('loading') {
+    <sb-page-header title="Blood request" icon="assignment" />
+    <sb-state-panel state="loading" message="Loading request…" />
+  }
+  @case ('error') {
+    <sb-page-header title="Blood request" icon="assignment">
+      <a mat-stroked-button [routerLink]="backLink()">
+        <mat-icon>arrow_back</mat-icon>
+        Back
+      </a>
+    </sb-page-header>
+    <sb-state-panel state="error" [message]="error()" (retry)="reload()" />
+  }
+  @default {
+    @let r = request()!;
+    @let sla = slaLevel(r.neededBy, r.status);
+    <sb-page-header
+      [title]="r.requestNo"
+      [subtitle]="(isCoordination() ? 'Coordination · ' : '') + 'Raised ' + (r.createdAt | sbDate)"
+      [icon]="isCoordination() ? 'hub' : 'assignment'"
+    >
+      <a mat-stroked-button [routerLink]="backLink()">
+        <mat-icon>arrow_back</mat-icon>
+        {{ isCoordination() ? 'Queue' : 'My requests' }}
+      </a>
+      @if (canOwnerCancel()) {
+        <button mat-stroked-button color="warn" type="button" [disabled]="busy()" (click)="ownerCancel()">
+          <mat-icon>cancel</mat-icon>
+          Cancel request
+        </button>
+      }
+    </sb-page-header>
+
+    @if (actionError()) {
+      <div class="sb-rv-banner" role="alert">
+        <mat-icon>{{ conflict() ? 'sync_problem' : 'error' }}</mat-icon>
+        <span class="grow">{{ actionError() }}</span>
+        @if (conflict()) {
+          <button mat-stroked-button type="button" (click)="reload()">
+            <mat-icon>refresh</mat-icon>
+            Reload latest
+          </button>
+        }
+      </div>
+    }
+
+    <div class="row g-3">
+      <div class="col-12 col-lg-8 d-flex flex-column gap-3">
+        <section class="sb-rv-card sb-rv-hero" [attr.data-sla]="isCoordination() ? sla : null">
+          <sb-blood-group-tile [aboGroup]="r.aboGroup" [rhFactor]="r.rhFactor" size="lg" />
+          <div class="grow">
+            <div class="sb-rv-hero-title">
+              <span class="sb-mono qty">
+                @if (r.quantityRequested !== null && r.quantityRequested !== undefined) {
+                  {{ r.quantityRequested | sbQty }} {{ r.unitCode }}
+                } @else {
+                  Quantity not reported
+                }
+              </span>
+              <span>{{ r.componentName || r.componentCode || 'Component not reported' }}</span>
+            </div>
+            <div class="sb-rv-hero-meta">
+              <sb-status-chip [status]="r.status" />
+              <sb-urgency-badge [urgency]="r.urgency" />
+              @if (sla !== 'none') {
+                <span class="sb-rv-sla" [attr.data-sla]="sla">
+                  <mat-icon inline>schedule</mat-icon>
+                  {{ slaText(r.neededBy) }}
+                </span>
+              }
+            </div>
+            @if (r.statusReason) {
+              <div class="sb-rv-reason"><mat-icon inline>info</mat-icon> {{ r.statusReason }}</div>
+            }
+          </div>
+        </section>
+
+        <section class="sb-rv-card">
+          <h2>Request details</h2>
+          <dl class="sb-rv-dl">
+            <dt>Reference</dt>
+            <dd class="sb-mono">{{ r.requestNo }}</dd>
+            <dt>Needed by</dt>
+            <dd>{{ r.neededBy ? (r.neededBy | sbDate) : 'Not reported' }}</dd>
+            <dt>Area</dt>
+            <dd>{{ r.areaName || 'Not reported' }}</dd>
+            <dt>Hospital</dt>
+            <dd>{{ r.hospitalName || 'Not reported' }}</dd>
+            @if (r.preferredFacilityName) {
+              <dt>Preferred facility</dt>
+              <dd>{{ r.preferredFacilityName }}</dd>
+            }
+            @if (r.patientReference) {
+              <dt>Patient reference</dt>
+              <dd class="sb-mono">{{ r.patientReference }}</dd>
+            }
+            @if (isCoordination() || !r.isOwner) {
+              <dt>Requester</dt>
+              <dd>{{ r.requesterName || 'Not reported' }}</dd>
+            }
+            <dt>Contact</dt>
+            <dd>
+              @if (r.contactName || r.contactPhone) {
+                {{ r.contactName }}
+                @if (r.contactPhone) {
+                  · <a class="sb-mono" [href]="tel(r.contactPhone)">{{ r.contactPhone }}</a>
+                }
+              } @else {
+                <span class="muted">Restricted</span>
+              }
+            </dd>
+            <dt>Last updated</dt>
+            <dd>{{ r.updatedAt || r.createdAt | sbRelative }}</dd>
+            @if (r.notes) {
+              <dt>Notes</dt>
+              <dd class="pre">{{ r.notes }}</dd>
+            }
+          </dl>
+        </section>
+
+        @if (showMatches()) {
+          <section class="sb-rv-card">
+            <div class="sb-rv-card-head">
+              <h2>Potential matches</h2>
+              <button mat-icon-button type="button" matTooltip="Refresh availability" (click)="loadMatches()">
+                <mat-icon>refresh</mat-icon>
+              </button>
+            </div>
+            <p class="muted small">
+              Same blood group and component at verified facilities with stock, same area first, fresh before aging.
+              Stale records are excluded. Always reconfirm stock with the facility.
+            </p>
+            @switch (matchesState()) {
+              @case ('loading') {
+                <sb-state-panel state="loading" message="Searching availability…" />
+              }
+              @case ('error') {
+                <sb-state-panel state="error" [message]="matchesError()" (retry)="loadMatches()" />
+              }
+              @case ('empty') {
+                <sb-state-panel state="empty" message="No fresh matching stock is currently reported." />
+              }
+              @default {
+                <div class="sb-rv-table-wrap">
+                  <table class="sb-rv-table">
+                    <thead>
+                      <tr>
+                        <th>Facility</th>
+                        <th>Area</th>
+                        <th class="num">Available</th>
+                        <th>Freshness</th>
+                        <th>Contact</th>
+                        <th></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      @for (m of matches(); track m.inventoryId) {
+                        <tr [class.current]="m.facilityId === r.matchedFacilityId">
+                          <td>
+                            <div class="fw-semibold">{{ m.facilityName }}</div>
+                            @if (m.is24x7) {
+                              <div class="small muted">24×7</div>
+                            }
+                          </td>
+                          <td>
+                            {{ m.areaName || 'Not reported' }}
+                            @if (m.areaId === r.areaId) {
+                              <span class="sb-rv-same-area">same area</span>
+                            }
+                          </td>
+                          <td class="num sb-mono">
+                            @if (m.quantity !== null && m.quantity !== undefined) {
+                              {{ m.quantity | sbQty }} {{ m.unitCode }}
+                            } @else {
+                              <span class="muted">Not reported</span>
+                            }
+                          </td>
+                          <td>
+                            <sb-freshness-badge
+                              [status]="m.freshnessStatus"
+                              [lastUpdatedAt]="m.lastUpdatedAt"
+                              [validUntil]="m.validUntil"
+                            />
+                          </td>
+                          <td>
+                            @if (m.contactPhone) {
+                              <a class="sb-mono" [href]="tel(m.contactPhone)">{{ m.contactPhone }}</a>
+                            } @else {
+                              <span class="muted">Not reported</span>
+                            }
+                          </td>
+                          <td class="text-end">
+                            @if (m.facilityId === r.matchedFacilityId) {
+                              <span class="sb-rv-matched"><mat-icon inline>check</mat-icon> Matched</span>
+                            } @else if (canMatch()) {
+                              <button
+                                mat-stroked-button
+                                color="primary"
+                                type="button"
+                                [disabled]="busy()"
+                                (click)="matchTo(m)"
+                              >
+                                <mat-icon>join_inner</mat-icon>
+                                Match
+                              </button>
+                            }
+                          </td>
+                        </tr>
+                      }
+                    </tbody>
+                  </table>
+                </div>
+              }
+            }
+          </section>
+        }
+      </div>
+
+      <div class="col-12 col-lg-4 d-flex flex-column gap-3">
+        @if (isCoordination()) {
+          <section class="sb-rv-card sb-rv-manage" *sbHasPermission="P.RequestsManage">
+            <h2><mat-icon>tune</mat-icon> Coordinate</h2>
+            @if (actions().length || canMatch()) {
+              <div class="sb-rv-actions">
+                @if (canMatch()) {
+                  <div class="small muted">Pick a facility from <em>Potential matches</em> to mark as matched.</div>
+                }
+                @for (a of actions(); track a.toStatus) {
+                  <button
+                    type="button"
+                    [attr.data-tone]="a.tone"
+                    [class]="'sb-rv-action ' + a.tone"
+                    mat-stroked-button
+                    [disabled]="busy()"
+                    (click)="transition(a)"
+                  >
+                    <mat-icon>{{ a.icon }}</mat-icon>
+                    {{ a.label }}
+                  </button>
+                }
+              </div>
+            } @else {
+              <p class="muted small mb-0">No further transitions are available for this request.</p>
+            }
+            @if (busy()) {
+              <div class="sb-rv-busy"><mat-progress-spinner mode="indeterminate" diameter="18" /> Saving…</div>
+            }
+          </section>
+        }
+
+        <section class="sb-rv-card">
+          <h2><mat-icon>apartment</mat-icon> Matched facility</h2>
+          @if (r.matchedFacilityName) {
+            <div class="fw-semibold">{{ r.matchedFacilityName }}</div>
+            @if (r.matchedFacilityPhone) {
+              <a class="sb-mono" [href]="tel(r.matchedFacilityPhone)">
+                <mat-icon inline>call</mat-icon> {{ r.matchedFacilityPhone }}
+              </a>
+            }
+            <p class="small muted mt-2 mb-0">Reported availability only — reconfirm stock with the facility.</p>
+          } @else {
+            <p class="muted mb-0">No facility matched yet.</p>
+          }
+        </section>
+
+        <section class="sb-rv-card">
+          <h2><mat-icon>timeline</mat-icon> Timeline</h2>
+          @if (history().length) {
+            <ol class="sb-rv-timeline">
+              @for (h of history(); track h.historyId) {
+                <li [attr.data-status]="h.toStatus">
+                  <div class="dot"></div>
+                  <div class="body">
+                    <div class="head">
+                      <sb-status-chip [status]="h.toStatus" />
+                      @if (h.fromStatus) {
+                        <span class="small muted">from {{ statusLabel(h.fromStatus) }}</span>
+                      }
+                    </div>
+                    @if (h.note) {
+                      <div class="note">{{ h.note }}</div>
+                    }
+                    @if (h.facilityName) {
+                      <div class="small"><mat-icon inline>apartment</mat-icon> {{ h.facilityName }}</div>
+                    }
+                    <div class="small muted">
+                      {{ h.changedByName || 'System' }} · <span [title]="h.changedAt | sbDate">{{ h.changedAt | sbRelative }}</span>
+                    </div>
+                  </div>
+                </li>
+              }
+            </ol>
+          } @else {
+            <p class="muted mb-0">No status history recorded yet.</p>
+          }
+        </section>
+      </div>
+    </div>
+  }
+}

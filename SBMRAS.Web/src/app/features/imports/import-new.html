@@ -1,0 +1,200 @@
+<sb-page-header
+  title="New bulk import"
+  subtitle="Your CSV is read in this browser — only the parsed rows are sent for validation."
+  icon="upload_file"
+>
+  <a mat-stroked-button routerLink="/imports">
+    <mat-icon>arrow_back</mat-icon>
+    All imports
+  </a>
+</sb-page-header>
+
+@switch (facilityState()) {
+  @case ('loading') {
+    <sb-state-panel state="loading" message="Loading your facilities…" />
+  }
+  @case ('error') {
+    <sb-state-panel state="error" [message]="facilityError()" (retry)="loadFacilities()" />
+  }
+  @case ('empty') {
+    <sb-state-panel
+      state="empty"
+      message="You are not assigned to any facility. Ask an administrator to assign you before importing."
+    />
+  }
+  @default {
+    <!-- Step 1: target -->
+    <section class="sb-card imp-step">
+      <h2><span class="step-no">1</span> Target facility and import type</h2>
+      <div class="imp-form">
+        <mat-form-field appearance="outline">
+          <mat-label>Facility</mat-label>
+          <mat-select
+            [value]="facilityId()"
+            (selectionChange)="selectFacility($event.value)"
+            [disabled]="!!batch() || busy()"
+            required
+          >
+            @for (f of facilities(); track f.facilityId) {
+              <mat-option [value]="f.facilityId">
+                {{ f.name }} · {{ f.facilityType === 'BloodBank' ? 'Blood bank' : 'Hospital' }}
+              </mat-option>
+            }
+          </mat-select>
+          @if (touched() && !facilityId()) {
+            <mat-hint class="bad">Select the facility this file belongs to.</mat-hint>
+          }
+        </mat-form-field>
+
+        <div>
+          <div class="muted mb-1"><small>Import type</small></div>
+          <mat-button-toggle-group
+            [value]="kind()"
+            (change)="setKind($event.value)"
+            [disabled]="!!batch() || busy()"
+            aria-label="Import type"
+          >
+            <mat-button-toggle value="Blood"><mat-icon>water_drop</mat-icon> Blood stock</mat-button-toggle>
+            <mat-button-toggle value="Resource"><mat-icon>medical_services</mat-icon> Medical resources</mat-button-toggle>
+          </mat-button-toggle-group>
+        </div>
+
+        <span class="flex-spacer"></span>
+        <button mat-stroked-button type="button" (click)="downloadTemplate()">
+          <mat-icon>download</mat-icon>
+          Download {{ kind() === 'Blood' ? 'blood stock' : 'resource' }} template
+        </button>
+      </div>
+      @if (kindMismatch()) {
+        <div class="alert alert-error" role="alert">
+          <mat-icon>error</mat-icon>
+          <span>
+            {{ selectedFacility()?.facilityType === 'Hospital' ? 'Hospitals import medical resources only.' : 'Blood banks import blood stock only.' }}
+          </span>
+        </div>
+      }
+    </section>
+
+    <!-- Step 2: file -->
+    <section class="sb-card imp-step">
+      <h2><span class="step-no">2</span> Choose CSV file</h2>
+      @if (!batch()) {
+        <label
+          class="drop-zone d-block"
+          [class.drag]="dragOver()"
+          (dragover)="onDragOver($event)"
+          (dragleave)="dragOver.set(false)"
+          (drop)="onDrop($event)"
+        >
+          <mat-icon>upload_file</mat-icon>
+          <div><strong>Drop a .csv file here</strong> or click to browse</div>
+          <small class="muted">Max {{ maxRows }} rows, 1 MB. Columns must match the template header.</small>
+          <input type="file" accept=".csv,text/csv" hidden (change)="onFileInput($event)" />
+        </label>
+      }
+      @if (fileName()) {
+        <p class="mt-2 mb-0">
+          <mat-icon inline>description</mat-icon>
+          <span class="mono">{{ fileName() }}</span> — {{ parsedRows().length }} data row(s) parsed
+        </p>
+      }
+      @if (fileErrors().length) {
+        <div class="alert alert-error" role="alert">
+          <mat-icon>error</mat-icon>
+          <ul>
+            @for (e of fileErrors(); track $index) {
+              <li>{{ e }}</li>
+            }
+          </ul>
+        </div>
+      }
+      @if (!batch() && parsedRows().length) {
+        @if (localIssueRows().length) {
+          <div class="alert alert-warn">
+            <mat-icon>warning</mat-icon>
+            <div>
+              {{ localIssueRows().length }} row(s) have problems detected in the browser. They will be marked Invalid
+              by the server; fix the file or continue to validate the rest.
+              <ul>
+                @for (r of localIssueRows().slice(0, 10); track r.rowNumber) {
+                  <li>Row {{ r.rowNumber }} ({{ rowLabel(r) }}): {{ r.localErrors.join(' ') }}</li>
+                }
+              </ul>
+              @if (localIssueRows().length > 10) {
+                <small>…and {{ localIssueRows().length - 10 }} more.</small>
+              }
+            </div>
+          </div>
+        } @else {
+          <div class="alert alert-info">
+            <mat-icon>check_circle</mat-icon>
+            <span>File structure looks good. Validate it against current stock and master data.</span>
+          </div>
+        }
+      }
+      @if (!batch()) {
+        <div class="actions">
+          <button mat-flat-button color="primary" type="button" [disabled]="!canValidate()" (click)="validate()">
+            <mat-icon>fact_check</mat-icon>
+            Validate rows
+          </button>
+        </div>
+      }
+    </section>
+
+    @if (busy()) {
+      <mat-progress-bar mode="indeterminate" />
+    }
+
+    @if (serverErrors().length) {
+      <div class="alert alert-error" role="alert">
+        <mat-icon>error</mat-icon>
+        <ul>
+          @for (e of serverErrors(); track $index) {
+            <li>{{ e }}</li>
+          }
+        </ul>
+      </div>
+    }
+
+    <!-- Step 3: preview + commit -->
+    @if (batch(); as b) {
+      <section class="sb-card imp-step">
+        <h2>
+          <span class="step-no">3</span> Validation preview —
+          <span class="mono">{{ b.batchNo }}</span>
+        </h2>
+        <div class="imp-counts mb-3">
+          <div class="count"><div class="label">Total</div><div class="value">{{ count(b.totalRows) }}</div></div>
+          <div class="count"><div class="label">Valid</div><div class="value ok">{{ count(b.validRows) }}</div></div>
+          <div class="count"><div class="label">Needs review</div><div class="value review">{{ count(b.reviewRows) }}</div></div>
+          <div class="count"><div class="label">Duplicate</div><div class="value warn">{{ count(b.duplicateRows) }}</div></div>
+          <div class="count"><div class="label">Invalid</div><div class="value bad">{{ count(b.invalidRows) }}</div></div>
+        </div>
+        @if ((b.reviewRows ?? 0) > 0) {
+          <div class="alert alert-info">
+            <mat-icon>pending</mat-icon>
+            <span>Rows flagged as anomalies (e.g. large jumps) will be held for a verifier's approval after commit.</span>
+          </div>
+        }
+        @if (!committable()) {
+          <div class="alert alert-warn">
+            <mat-icon>warning</mat-icon>
+            <span>No rows can be applied. Cancel this batch, fix the file and upload again.</span>
+          </div>
+        }
+        <sb-import-rows-table [rows]="b.rows" [kind]="b.inventoryKind || kind()" />
+        <div class="actions">
+          <button mat-stroked-button color="warn" type="button" [disabled]="busy()" (click)="cancelBatch()">
+            <mat-icon>close</mat-icon>
+            Cancel batch
+          </button>
+          <button mat-flat-button color="primary" type="button" [disabled]="busy() || !committable()" (click)="commit()">
+            <mat-icon>done_all</mat-icon>
+            Commit import
+          </button>
+        </div>
+      </section>
+    }
+  }
+}

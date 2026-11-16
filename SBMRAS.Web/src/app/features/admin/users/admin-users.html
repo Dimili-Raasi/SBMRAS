@@ -1,0 +1,127 @@
+<sb-page-header
+  title="Users & Access"
+  subtitle="Search accounts, manage Local roles, activation and facility assignments. Entra-sourced roles are synchronised at sign-in."
+  icon="manage_accounts"
+>
+  <button mat-flat-button color="primary" type="button" *sbHasPermission="P.UsersManage" (click)="open(null)">
+    <mat-icon>person_add</mat-icon>
+    Pre-provision user
+  </button>
+</sb-page-header>
+
+<section class="sb-admin-card">
+  <form class="sb-admin-filters" [formGroup]="filters" (submit)="$event.preventDefault()">
+    <mat-form-field appearance="outline" subscriptSizing="dynamic" class="grow">
+      <mat-label>Search</mat-label>
+      <mat-icon matPrefix>search</mat-icon>
+      <input matInput formControlName="search" placeholder="Name, e-mail, organisation or phone" maxlength="200" />
+    </mat-form-field>
+    <mat-form-field appearance="outline" subscriptSizing="dynamic">
+      <mat-label>Role</mat-label>
+      <mat-select formControlName="roleCode">
+        <mat-option value="">All roles</mat-option>
+        @for (r of roleOptions; track r.code) {
+          <mat-option [value]="r.code">{{ r.name }}</mat-option>
+        }
+      </mat-select>
+    </mat-form-field>
+    <mat-form-field appearance="outline" subscriptSizing="dynamic">
+      <mat-label>Status</mat-label>
+      <mat-select formControlName="isActive">
+        <mat-option value="">Any status</mat-option>
+        <mat-option value="true">Active</mat-option>
+        <mat-option value="false">Inactive</mat-option>
+      </mat-select>
+    </mat-form-field>
+    <button mat-stroked-button type="button" (click)="clearFilters()">
+      <mat-icon>filter_alt_off</mat-icon>
+      Clear
+    </button>
+  </form>
+
+  @switch (state()) {
+    @case ('loading') {
+      <sb-state-panel state="loading" message="Loading users…" />
+    }
+    @case ('error') {
+      <sb-state-panel state="error" [message]="error()" (retry)="reload()" />
+    }
+    @case ('empty') {
+      <sb-state-panel state="empty" message="No users match the selected filters." />
+    }
+    @default {
+      <div class="sb-admin-table-wrap">
+        <table class="sb-admin-table">
+          <thead>
+            <tr>
+              <th>User</th>
+              <th>Organisation / area</th>
+              <th>Roles</th>
+              <th class="num">Facilities</th>
+              <th>Identity</th>
+              <th>Last sign-in</th>
+              <th>Status</th>
+              <th class="actions"><span class="visually-hidden">Actions</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (u of users(); track u.userId) {
+              <tr [class.inactive]="!u.isActive">
+                <td>
+                  <button type="button" class="sb-link" (click)="open(u)">{{ u.displayName }}</button>
+                  <div class="muted small">{{ u.email || 'No e-mail' }}</div>
+                </td>
+                <td>
+                  <div>{{ u.organizationName || '—' }}</div>
+                  <div class="muted small">{{ u.areaName || 'No area' }}</div>
+                </td>
+                <td>
+                  <div class="sb-chip-row">
+                    @for (code of u.roleCodes; track code; let i = $index) {
+                      <span class="sb-role-chip" [attr.data-role]="code">{{ u.roleNames[i] || code }}</span>
+                    }
+                  </div>
+                </td>
+                <td class="num mono">{{ u.facilityCount ?? 0 }}</td>
+                <td>
+                  @if (u.entraLinked) {
+                    <span class="sb-source-badge entra" matTooltip="Linked to a Microsoft Entra identity">
+                      <mat-icon inline>verified_user</mat-icon> Entra
+                    </span>
+                  } @else {
+                    <span class="sb-source-badge local" matTooltip="Pre-provisioned; links on first sign-in by e-mail">
+                      <mat-icon inline>hourglass_empty</mat-icon> Not linked
+                    </span>
+                  }
+                  @if (u.isSelfRegistered) {
+                    <div class="muted small">Self-registered</div>
+                  }
+                </td>
+                <td class="small">{{ u.lastLoginAt ? (u.lastLoginAt | date: 'dd MMM yyyy, HH:mm') : 'Never' }}</td>
+                <td>
+                  <span class="sb-active-pill" [class.off]="!u.isActive">{{ u.isActive ? 'Active' : 'Inactive' }}</span>
+                </td>
+                <td class="actions">
+                  <button mat-icon-button type="button" matTooltip="Profile & roles" (click)="open(u, 0)">
+                    <mat-icon>edit</mat-icon>
+                  </button>
+                  <button mat-icon-button type="button" matTooltip="Facility assignments" (click)="open(u, 1)">
+                    <mat-icon>apartment</mat-icon>
+                  </button>
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+      <mat-paginator
+        [length]="total()"
+        [pageIndex]="page() - 1"
+        [pageSize]="pageSize()"
+        [pageSizeOptions]="[10, 20, 50, 100]"
+        (page)="onPage($event)"
+        showFirstLastButtons
+      />
+    }
+  }
+</section>

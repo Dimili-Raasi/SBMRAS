@@ -1,0 +1,98 @@
+<sb-page-header
+  title="Notifications"
+  subtitle="Request updates, review tasks and inventory warnings for your account."
+  icon="notifications"
+>
+  <button
+    mat-stroked-button
+    type="button"
+    [disabled]="markingAll() || state() === 'loading'"
+    (click)="markAllRead()"
+  >
+    <mat-icon>done_all</mat-icon>
+    Mark all read
+  </button>
+</sb-page-header>
+
+<section class="sb-nt-card">
+  <div class="sb-nt-toolbar">
+    <mat-button-toggle-group
+      [value]="unreadOnly()"
+      (change)="setFilter($event.value)"
+      aria-label="Notification filter"
+      hideSingleSelectionIndicator
+    >
+      <mat-button-toggle [value]="false">All</mat-button-toggle>
+      <mat-button-toggle [value]="true">Unread</mat-button-toggle>
+    </mat-button-toggle-group>
+    <button mat-icon-button type="button" matTooltip="Refresh" (click)="reload()">
+      <mat-icon>refresh</mat-icon>
+    </button>
+  </div>
+
+  @switch (state()) {
+    @case ('loading') {
+      <sb-state-panel state="loading" message="Loading notifications…" />
+    }
+    @case ('error') {
+      <sb-state-panel state="error" [message]="error()" (retry)="reload()" />
+    }
+    @case ('empty') {
+      <sb-state-panel
+        state="empty"
+        [message]="unreadOnly() ? 'You are all caught up — no unread notifications.' : 'You have no notifications yet.'"
+      />
+    }
+    @default {
+      <ul class="sb-nt-list">
+        @for (n of items(); track n.notificationId) {
+          <li
+            class="sb-nt-item"
+            [class.unread]="!n.isRead"
+            [class.clickable]="!!n.route"
+            [attr.data-type]="n.type"
+            [attr.tabindex]="n.route ? 0 : null"
+            (click)="open(n)"
+            (keydown.enter)="open(n)"
+          >
+            <mat-icon class="sb-nt-icon">{{ icon(n.type) }}</mat-icon>
+            <div class="sb-nt-body">
+              <div class="sb-nt-title">
+                {{ n.title }}
+                @if (!n.isRead) {
+                  <span class="sb-nt-dot" aria-label="Unread"></span>
+                }
+              </div>
+              <div class="sb-nt-message">{{ n.message }}</div>
+              <div class="sb-nt-meta" [title]="n.createdAt | sbDate">{{ n.createdAt | sbRelative }}</div>
+            </div>
+            <div class="sb-nt-actions">
+              @if (!n.isRead) {
+                <button
+                  mat-icon-button
+                  type="button"
+                  matTooltip="Mark as read"
+                  [disabled]="busyIds().has(n.notificationId)"
+                  (click)="markRead(n, true, $event)"
+                >
+                  <mat-icon>mark_email_read</mat-icon>
+                </button>
+              }
+              @if (n.route) {
+                <mat-icon class="sb-nt-chevron">chevron_right</mat-icon>
+              }
+            </div>
+          </li>
+        }
+      </ul>
+      <mat-paginator
+        [length]="total()"
+        [pageIndex]="page() - 1"
+        [pageSize]="pageSize()"
+        [pageSizeOptions]="[10, 20, 50]"
+        (page)="onPage($event)"
+        aria-label="Notification pages"
+      />
+    }
+  }
+</section>

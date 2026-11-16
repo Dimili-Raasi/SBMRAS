@@ -1,0 +1,30 @@
+﻿{
+  "IsEncrypted": false,
+  "Host": {
+    "LocalHttpPort": 7073,
+    "CORS": "http://localhost:4400",
+    "CORSCredentials": false
+  },
+  "Values": {
+    "FUNCTIONS_WORKER_RUNTIME": "dotnet-isolated",
+    "AzureWebJobsStorage": "",
+    "AzureWebJobsSecretStorageType": "files",
+    "AzureFunctionsJobHost__healthMonitor__enabled": "false",
+    "SqlConnectionString": "Server=localhost;Database=SBMRAS;Trusted_Connection=True;TrustServerCertificate=True;Encrypt=False",
+    "Auth:Mode": "DevHeader",
+    "Auth:Entra:Instance": "https://<tenant-subdomain>.ciamlogin.com/",
+    "Auth:Entra:TenantId": "",
+    "Auth:Entra:ClientId": "",
+    "Auth:Entra:SpaClientId": "",
+    "Auth:Entra:Audience": "",
+    "Auth:Entra:RequiredScope": "access_as_user",
+    "Auth:Entra:UserFlow": "B2X_1_SBMRAS-SignUpSignIn",
+    "Auth:Entra:Groups:HospitalManagement": "",
+    "Auth:Entra:Groups:BloodBank": "",
+    "Auth:Entra:Groups:Admin": "",
+    "Cors:AllowedOrigins": "http://localhost:4400",
+    "Freshness:BloodStockTtlMinutes": "360",
+    "Freshness:ResourceTtlMinutes": "240",
+    "Import:MaxRows": "500"
+  }
+}

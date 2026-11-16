@@ -1,0 +1,172 @@
+name: Deploy web
+
+# Manual only. Builds SBMRAS.Web with the Angular configuration for the target environment
+# (src/environments/environment.<env>.ts) and deploys dist/SBMRAS.Web/browser to the App Service web app.
+# The app serves it with "pm2 serve --spa" (set in infra/modules/webapp.bicep), which falls back to index.html
+# for client-side routes. The SPA calls the Function App directly (apiBaseUrl); the Function App's CORS allows
+# the web app origin. The Entra External ID settings (authority, SPA client id, API scope, user flow) are not baked into
+# the bundle: the SPA reads them at runtime from GET <apiBaseUrl>/auth/config, which the Function App serves from its
+# Auth__Entra__* settings. For self-hosting on IIS behind a Cloudflare tunnel see deploy/DEPLOYMENT_CHECKLIST.md.
+# Pick the branch in Actions > Run workflow > "Use workflow from". Every job checks out that run's exact commit
+# (github.sha), so the Bicep, scripts, local actions and app source all come from the same commit.
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment
+        type: choice
+        options:
+          - dev
+          - test
+          - prod
+        default: dev
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-web-${{ inputs.environment }}
+  cancel-in-progress: false
+
+env:
+  BROWSER_DIR: SBMRAS.Web/dist/SBMRAS.Web/browser
+
+jobs:
+  branch-guard:
+    name: Branch policy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: ./.github/actions/assert-deploy-branch
+        with:
+          environment: ${{ inputs.environment }}
+
+  build:
+    name: Build web (${{ inputs.environment }})
+    needs: branch-guard
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: SBMRAS.Web
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: SBMRAS.Web/package-lock.json
+
+      - run: npm ci
+
+      - run: npm run build:${{ inputs.environment }}
+
+      - name: Check build output
+        working-directory: ${{ github.workspace }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f "$BROWSER_DIR/index.html" || { echo "::error::$BROWSER_DIR/index.html was not produced."; exit 1; }
+          # public/web.config is for IIS hosting (deploy/iis); the Linux web app does not use it.
+          rm -f "$BROWSER_DIR/web.config"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: web-browser
+          path: ${{ env.BROWSER_DIR }}
+          retention-days: 7
+          if-no-files-found: error
+
+  deploy:
+    name: Deploy web (${{ inputs.environment }})
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ inputs.environment }}
+      url: https://${{ vars.WEB_APP_NAME }}.azurewebsites.net
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      TARGET_ENV: ${{ inputs.environment }}
+      WEB_APP_NAME: ${{ vars.WEB_APP_NAME }}
+      FUNCTION_APP_NAME: ${{ vars.FUNCTION_APP_NAME }}
+    steps:
+      - name: Check required variables
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing=()
+          for name in WEB_APP_NAME FUNCTION_APP_NAME; do
+            [ -n "${!name:-}" ] || missing+=("$name")
+          done
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::Set these variables on the '$TARGET_ENV' GitHub environment: ${missing[*]}"
+            exit 1
+          fi
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: web-browser
+          path: site
+
+      - name: Check API URL in bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          api="https://${FUNCTION_APP_NAME}.azurewebsites.net/api/v1"
+          if ! grep -rqF "$api" site --include='*.js'; then
+            echo "::error::The bundle does not call $api. Update apiBaseUrl in SBMRAS.Web/src/environments/environment.$TARGET_ENV.ts to match FUNCTION_APP_NAME."
+            exit 1
+          fi
+          echo "Bundle calls $api."
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v3
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Deploy to App Service
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ vars.WEB_APP_NAME }}
+          package: site
+
+      - name: Verify site and API access
+        shell: bash
+        run: |
+          set -euo pipefail
+          web="https://${WEB_APP_NAME}.azurewebsites.net"
+          api="https://${FUNCTION_APP_NAME}.azurewebsites.net/api/v1"
+
+          is_html() { curl -sS -o page.html -w '%{http_code}' "$1" | grep -qx 200 && grep -qi '<app-root' page.html; }
+          ok=false
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            if is_html "$web/"; then ok=true; break; fi
+            echo "Attempt $attempt: $web/ not ready; retrying in 15s..."
+            sleep 15
+          done
+          [ "$ok" = true ] || { echo "::error::$web/ did not return the SPA."; exit 1; }
+          is_html "$web/dashboard" || { echo "::error::Deep link $web/dashboard did not fall back to index.html."; exit 1; }
+
+          headers=$(curl -sS -o config.json -D - -H "Origin: $web" "$api/auth/config")
+          echo "$headers" | head -n 1
+          echo "$headers" | grep -qi '^content-type: *application/json' && jq -e . config.json > /dev/null \
+            || { echo "::error::$api/auth/config did not return JSON. Deploy the API first."; exit 1; }
+          echo "$headers" | grep -qiE "^access-control-allow-origin: *($web|\*)" \
+            || { echo "::error::$api does not allow CORS from $web. Re-run deploy-infra or deploy-api for $TARGET_ENV."; exit 1; }
+
+          {
+            echo "Web deployed to **$TARGET_ENV**: $web"
+            echo
+            echo "- SPA root and deep-link fallback return index.html"
+            echo "- \`$api/auth/config\` returns JSON with CORS for \`$web\`"
+          } >> "$GITHUB_STEP_SUMMARY"

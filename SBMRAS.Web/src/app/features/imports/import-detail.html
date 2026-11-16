@@ -1,0 +1,86 @@
+@switch (state()) {
+  @case ('loading') {
+    <sb-page-header title="Import batch" icon="upload_file" />
+    <sb-state-panel state="loading" message="Loading import batch…" />
+  }
+  @case ('error') {
+    <sb-page-header title="Import batch" icon="upload_file">
+      <a mat-stroked-button routerLink="/imports"><mat-icon>arrow_back</mat-icon> All imports</a>
+    </sb-page-header>
+    <sb-state-panel state="error" [message]="error()" (retry)="load()" />
+  }
+  @default {
+    @if (batch(); as b) {
+      <sb-page-header
+        [title]="'Import ' + b.batchNo"
+        [subtitle]="b.facilityName + ' · ' + (b.inventoryKind === 'Blood' ? 'Blood stock' : 'Medical resources')"
+        icon="upload_file"
+      >
+        <a mat-stroked-button routerLink="/imports"><mat-icon>arrow_back</mat-icon> All imports</a>
+        @if (b.status === 'Validated') {
+          <button mat-stroked-button color="warn" type="button" [disabled]="busy()" (click)="cancel()">
+            <mat-icon>close</mat-icon> Cancel batch
+          </button>
+          <button mat-flat-button color="primary" type="button" [disabled]="busy() || !canCommit(b)" (click)="commit()">
+            <mat-icon>done_all</mat-icon> Commit
+          </button>
+        }
+      </sb-page-header>
+
+      <section class="sb-card">
+        <dl class="meta-grid mb-3">
+          <div>
+            <dt>Status</dt>
+            <dd><span [class]="'imp-status imp-status--' + b.status.toLowerCase()">{{ b.status }}</span></dd>
+          </div>
+          <div><dt>File</dt><dd class="mono">{{ b.fileName }}</dd></div>
+          <div>
+            <dt>Submitted</dt>
+            <dd>
+              {{ b.submittedAt ? (b.submittedAt | date: 'dd MMM yyyy, HH:mm') : 'Not reported' }}
+              @if (b.submittedByName) { <small class="muted">by {{ b.submittedByName }}</small> }
+            </dd>
+          </div>
+          <div>
+            <dt>Committed</dt>
+            <dd>
+              @if (b.committedAt) {
+                {{ b.committedAt | date: 'dd MMM yyyy, HH:mm' }}
+                @if (b.committedByName) { <small class="muted">by {{ b.committedByName }}</small> }
+              } @else {
+                <span class="muted">Not committed</span>
+              }
+            </dd>
+          </div>
+          <div><dt>File hash</dt><dd class="mono raw" [title]="b.fileHash">{{ b.fileHash }}</dd></div>
+        </dl>
+        <div class="imp-counts">
+          <div class="count"><div class="label">Total</div><div class="value">{{ count(b.totalRows) }}</div></div>
+          <div class="count"><div class="label">Valid</div><div class="value ok">{{ count(b.validRows) }}</div></div>
+          <div class="count"><div class="label">Review</div><div class="value review">{{ count(b.reviewRows) }}</div></div>
+          <div class="count"><div class="label">Duplicate</div><div class="value warn">{{ count(b.duplicateRows) }}</div></div>
+          <div class="count"><div class="label">Invalid</div><div class="value bad">{{ count(b.invalidRows) }}</div></div>
+          <div class="count"><div class="label">Applied</div><div class="value">{{ count(b.appliedRows) }}</div></div>
+        </div>
+        @if (b.status === 'Committed' && (b.reviewRows ?? 0) > 0) {
+          <div class="alert alert-info">
+            <mat-icon>pending</mat-icon>
+            <span>
+              {{ b.reviewRows }} row(s) were sent to
+              <a routerLink="/verifications">Change Verification</a> for approval.
+            </span>
+          </div>
+        }
+      </section>
+
+      <section class="sb-card">
+        <h2 class="h6 mb-3">Rows</h2>
+        @if (b.rows.length) {
+          <sb-import-rows-table [rows]="b.rows" [kind]="b.inventoryKind" />
+        } @else {
+          <sb-state-panel state="empty" message="This batch has no rows." />
+        }
+      </section>
+    }
+  }
+}

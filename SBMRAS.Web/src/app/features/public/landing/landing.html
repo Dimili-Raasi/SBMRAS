@@ -1,0 +1,148 @@
+<section class="landing-hero" aria-labelledby="landing-title">
+  <div class="hero-copy">
+    <p class="eyebrow"><span class="live-dot"></span> VERIFIED AVAILABILITY NETWORK</p>
+    <h1 id="landing-title">Find what care teams need,<br /><em>when it matters.</em></h1>
+    <p class="hero-lede">
+      Search reported blood stock and medical resources from verified facilities. Availability is
+      time-stamped and freshness is visible at a glance.
+    </p>
+    <form class="hero-search" [formGroup]="searchForm" (ngSubmit)="findBlood()">
+      <mat-form-field appearance="outline" subscriptSizing="dynamic" class="hero-search__term">
+        <mat-label>Search by facility, city or area</mat-label>
+        <mat-icon matPrefix>search</mat-icon>
+        <input matInput formControlName="search" maxlength="100" />
+      </mat-form-field>
+      <mat-form-field appearance="outline" subscriptSizing="dynamic" class="hero-search__area">
+        <mat-label>Area</mat-label>
+        <mat-select formControlName="areaId">
+          <mat-option [value]="null">All areas</mat-option>
+          @for (area of areas(); track area.areaId) {
+            <mat-option [value]="area.areaId">{{ area.name }} · {{ area.city }}</mat-option>
+          }
+        </mat-select>
+      </mat-form-field>
+      <button mat-flat-button color="primary" type="submit">
+        Search availability <mat-icon>arrow_forward</mat-icon>
+      </button>
+    </form>
+    <div class="hero-links">
+      <a routerLink="/find-blood"><mat-icon>bloodtype</mat-icon> Find blood stock</a>
+      <a routerLink="/find-resources"><mat-icon>medical_services</mat-icon> Find medical resources</a>
+      <a routerLink="/directory"><mat-icon>domain</mat-icon> Browse facilities</a>
+    </div>
+  </div>
+  <div class="hero-illustration" aria-hidden="true">
+    <div class="orb orb--one"></div>
+    <div class="orb orb--two"></div>
+    <div class="lab-card">
+      <div class="lab-card__top"><span>LIVE NETWORK</span><span class="signal">●●●</span></div>
+      <div class="lab-blood">O<sup>+</sup></div>
+      <div class="lab-caption">REPORTED STOCK</div>
+      <div class="lab-divider"></div>
+      <div class="lab-card__bottom"><mat-icon>verified</mat-icon> Facility verified</div>
+    </div>
+    <div class="science-ring science-ring--one"></div>
+    <div class="science-ring science-ring--two"></div>
+  </div>
+</section>
+
+<section class="stats-section" aria-labelledby="network-title">
+  <div class="section-heading">
+    <p class="eyebrow">NETWORK SNAPSHOT</p>
+    <h2 id="network-title">A clearer view of availability</h2>
+    <p>Network indicators are based on the latest records reported by participating facilities.</p>
+  </div>
+  @switch (state()) {
+    @case ('loading') {
+      <sb-state-panel state="loading" message="Loading network indicators…" />
+    }
+    @case ('error') {
+      <sb-state-panel state="error" [message]="error()" (retry)="reload()" />
+    }
+    @case ('empty') {
+      <sb-state-panel state="empty" message="Network indicators are not available yet." (retry)="reload()" />
+    }
+    @default {
+      @if (stats(); as summary) {
+        <div class="stats-grid">
+          <article class="stat-card">
+            <span class="stat-icon teal"><mat-icon>domain</mat-icon></span>
+            <span class="stat-label">Verified facilities</span>
+            <strong>{{ statValue(summary.verifiedFacilities) }}</strong>
+            <span class="stat-detail">Hospitals and blood banks</span>
+          </article>
+          <article class="stat-card">
+            <span class="stat-icon crimson"><mat-icon>water_drop</mat-icon></span>
+            <span class="stat-label">Reported units available</span>
+            <strong>{{ statValue(summary.unitsAvailable) }}</strong>
+            <span class="stat-detail">Across available blood components</span>
+          </article>
+          <article class="stat-card">
+            <span class="stat-icon amber"><mat-icon>schedule</mat-icon></span>
+            <span class="stat-label">Fresh records</span>
+            <strong>{{ statValue(summary.freshPercent, true) }}</strong>
+            <span class="stat-detail">Of records within freshness window</span>
+          </article>
+          <article class="stat-card">
+            <span class="stat-icon blue"><mat-icon>assignment</mat-icon></span>
+            <span class="stat-label">Open requests</span>
+            <strong>{{ statValue(summary.openRequests) }}</strong>
+            <span class="stat-detail">Coordination requests in progress</span>
+          </article>
+        </div>
+        <p class="stats-updated">
+          @if (summary.lastUpdatedAt) {
+            Network data updated {{ summary.lastUpdatedAt | sbRelative }}.
+          } @else {
+            Network update time not reported.
+          }
+          Counts reflect reported availability, not reservations.
+        </p>
+      } @else {
+        <sb-state-panel state="empty" message="Network indicators are not available yet." (retry)="reload()" />
+      }
+    }
+  }
+</section>
+
+<section class="how-section" aria-labelledby="how-title">
+  <div class="section-heading">
+    <p class="eyebrow">HOW SBMRAS WORKS</p>
+    <h2 id="how-title">Reliable information. Better coordination.</h2>
+    <p>One shared view of reported resources—with provenance and freshness made visible.</p>
+  </div>
+  <div class="steps-grid">
+    <article class="step-card">
+      <span class="step-number">01</span><mat-icon>search</mat-icon>
+      <h3>Search nearby</h3><p>Filter blood stock, medical resources, and verified facilities by area.</p>
+    </article>
+    <article class="step-card">
+      <span class="step-number">02</span><mat-icon>query_stats</mat-icon>
+      <h3>Check freshness</h3><p>See when information was last updated and whether it is still current.</p>
+    </article>
+    <article class="step-card">
+      <span class="step-number">03</span><mat-icon>call</mat-icon>
+      <h3>Reconfirm directly</h3><p>Contact the facility before acting—availability may change at any time.</p>
+    </article>
+  </div>
+</section>
+
+<section class="freshness-section" aria-labelledby="freshness-title">
+  <div>
+    <p class="eyebrow">DATA YOU CAN INTERPRET</p>
+    <h2 id="freshness-title">Every record has context.</h2>
+    <p>Freshness describes how recently availability was reported. It is not a guarantee of stock.</p>
+  </div>
+  <ul class="freshness-legend">
+    <li><span class="legend-dot fresh"></span><strong>Fresh</strong><span>Within the update window</span></li>
+    <li><span class="legend-dot aging"></span><strong>Aging</strong><span>Approaching the update limit</span></li>
+    <li><span class="legend-dot stale"></span><strong>Stale</strong><span>Update window has passed</span></li>
+    <li><span class="legend-dot unknown"></span><strong>Unknown</strong><span>No recent update reported</span></li>
+    <li><span class="legend-dot review"></span><strong>Under review</strong><span>Awaiting verification</span></li>
+  </ul>
+</section>
+
+<aside class="public-disclaimer">
+  <mat-icon>info</mat-icon>
+  <p><strong>Important:</strong> SBMRAS shows reported availability. Always reconfirm with the facility. This is not a clinical decision tool.</p>
+</aside>

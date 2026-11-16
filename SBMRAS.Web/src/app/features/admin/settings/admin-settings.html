@@ -1,0 +1,106 @@
+<sb-page-header
+  title="System Settings"
+  subtitle="Freshness windows, stock thresholds, anomaly detection and data-quality weights. Values are validated by type and range."
+  icon="tune"
+>
+  @if (state() === 'ready') {
+    <ng-container *sbHasPermission="P.SettingsManage">
+      <button mat-stroked-button type="button" [disabled]="saving() || !changes().length" (click)="discard()">
+        <mat-icon>undo</mat-icon>
+        Discard
+      </button>
+      <button mat-flat-button color="primary" type="button" [disabled]="saving() || !changes().length" (click)="save()">
+        <mat-icon>save</mat-icon>
+        Save @if (changes().length) { ({{ changes().length }}) }
+      </button>
+    </ng-container>
+  }
+</sb-page-header>
+
+@switch (state()) {
+  @case ('loading') {
+    <section class="sb-admin-card"><sb-state-panel state="loading" message="Loading settings…" /></section>
+  }
+  @case ('error') {
+    <section class="sb-admin-card"><sb-state-panel state="error" [message]="error()" (retry)="load()" /></section>
+  }
+  @case ('empty') {
+    <section class="sb-admin-card"><sb-state-panel state="empty" message="No system settings are configured." /></section>
+  }
+  @default {
+    @if (saving()) {
+      <mat-progress-bar mode="indeterminate" />
+    }
+    @if (saveError()) {
+      <div class="sb-form-error" role="alert"><mat-icon>error</mat-icon>{{ saveError() }}</div>
+    }
+    <form [formGroup]="form()" (ngSubmit)="save()" novalidate class="sb-settings-grid">
+      @for (g of groups(); track g.category) {
+        <section class="sb-admin-card sb-settings-group">
+          <header class="sb-settings-head">
+            <h3>{{ g.category }}</h3>
+            @if (g.settings[0].settingKey.startsWith('QUALITY_WEIGHT_') && qualityTotal() !== null) {
+              <span class="sb-status-pill" [attr.data-tone]="qualityTotal() === 100 ? 'ok' : 'warn'"
+                matTooltip="Weights should add up to 100%">
+                Total {{ qualityTotal() }}%
+              </span>
+            }
+          </header>
+          @for (s of g.settings; track s.settingKey) {
+            <div class="sb-setting-row" [class.changed]="isChanged(s)">
+              <div class="sb-setting-label">
+                <div class="fw-semibold">{{ meta(s).label }}</div>
+                <div class="mono muted small">{{ s.settingKey }}</div>
+                @if (s.description) {
+                  <div class="muted small">{{ s.description }}</div>
+                }
+                @if (s.updatedAt) {
+                  <div class="muted xsmall">
+                    Updated {{ s.updatedAt | date: 'dd MMM yyyy, HH:mm' }}{{ s.updatedByName ? ' by ' + s.updatedByName : '' }}
+                  </div>
+                }
+              </div>
+              <div class="sb-setting-input">
+                @switch (s.dataType) {
+                  @case ('bool') {
+                    <mat-slide-toggle [formControl]="ctrl(s.settingKey)" [aria-label]="meta(s).label">
+                      {{ ctrl(s.settingKey).value ? 'On' : 'Off' }}
+                    </mat-slide-toggle>
+                  }
+                  @case ('string') {
+                    <mat-form-field appearance="outline" subscriptSizing="dynamic">
+                      <input matInput [formControl]="ctrl(s.settingKey)" maxlength="400" [attr.aria-label]="meta(s).label" />
+                      @if (ctrl(s.settingKey).invalid) {
+                        <mat-error>{{ errorFor(s) }}</mat-error>
+                      }
+                    </mat-form-field>
+                  }
+                  @default {
+                    <mat-form-field appearance="outline" subscriptSizing="dynamic">
+                      <input
+                        matInput
+                        type="number"
+                        class="mono"
+                        [step]="s.dataType === 'int' ? 1 : 0.01"
+                        [attr.min]="meta(s).min ?? 0"
+                        [attr.max]="meta(s).max ?? null"
+                        [formControl]="ctrl(s.settingKey)"
+                        [attr.aria-label]="meta(s).label"
+                      />
+                      @if (meta(s).suffix) {
+                        <span matTextSuffix class="muted">&nbsp;{{ meta(s).suffix }}</span>
+                      }
+                      @if (ctrl(s.settingKey).invalid) {
+                        <mat-error>{{ errorFor(s) }}</mat-error>
+                      }
+                    </mat-form-field>
+                  }
+                }
+              </div>
+            </div>
+          }
+        </section>
+      }
+    </form>
+  }
+}

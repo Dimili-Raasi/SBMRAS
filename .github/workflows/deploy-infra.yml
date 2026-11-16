@@ -1,0 +1,252 @@
+name: Deploy infrastructure
+
+# Manual only. Creates or updates the Azure resources for one environment in two Bicep stages:
+#   1. infra/foundation.bicep - runtime managed identity + Function host storage.
+#      The runtime identity then needs three data-plane roles on that storage account. This workflow assigns them when
+#      the GitHub deployment identity is allowed to (Owner / User Access Administrator / RBAC Administrator on the
+#      resource group); otherwise it stops and prints the exact role assignments an Owner must create.
+#   2. infra/main.bicep - Azure SQL server + database, Function App (Flex Consumption), web app, monitoring.
+# Then, connected as the SQL server's Microsoft Entra admin (the GitHub deployment identity, SQL_ENTRA_ADMIN_* variables),
+# it grants the runtime identity EXECUTE on the stored procedures and creates the sbmras_migrator user used by
+# deploy-database.yml (password from the SQL_MIGRATION_PASSWORD environment secret).
+# Run order for a new environment: deploy-infra -> deploy-database (apply) -> deploy-api -> deploy-web.
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment
+        type: choice
+        options:
+          - dev
+          - test
+          - prod
+        default: dev
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-infra-${{ inputs.environment }}
+  cancel-in-progress: false
+
+env:
+  GO_SQLCMD_VERSION: v1.10.0
+
+jobs:
+  branch-guard:
+    name: Branch policy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: ./.github/actions/assert-deploy-branch
+        with:
+          environment: ${{ inputs.environment }}
+
+  infrastructure:
+    name: Infrastructure (${{ inputs.environment }})
+    needs: branch-guard
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      TARGET_ENV: ${{ inputs.environment }}
+      AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP || (inputs.environment == 'dev' && 'rg-sbmras-dev' || '') }}
+      AZURE_LOCATION: ${{ vars.AZURE_LOCATION || 'indiasouthcentral' }}
+      SQL_SERVER_NAME: ${{ vars.SQL_SERVER_NAME || (inputs.environment == 'dev' && 'sbmras-sql-dev' || '') }}
+      SQL_DATABASE_NAME: ${{ vars.SQL_DATABASE_NAME || (inputs.environment == 'dev' && 'SBMRAS' || '') }}
+      SQL_SERVER_RESOURCE_GROUP: ${{ vars.SQL_SERVER_RESOURCE_GROUP }}
+      SQL_LOCATION: ${{ vars.SQL_LOCATION }}
+      SQL_ADMIN_LOGIN: ${{ vars.SQL_ADMIN_LOGIN || 'sbmrasadmin' }}
+      SQL_ADMIN_PASSWORD: ${{ secrets.SQL_ADMIN_PASSWORD }}
+      SQL_MIGRATION_PASSWORD: ${{ secrets.SQL_MIGRATION_PASSWORD }}
+      SQL_ENTRA_ADMIN_LOGIN: ${{ vars.SQL_ENTRA_ADMIN_LOGIN }}
+      SQL_ENTRA_ADMIN_OBJECT_ID: ${{ vars.SQL_ENTRA_ADMIN_OBJECT_ID }}
+      SQL_USE_FREE_LIMIT: ${{ vars.SQL_USE_FREE_LIMIT || 'false' }}
+      ENTRA_AUTHORITY: ${{ vars.ENTRA_AUTHORITY }}
+      ENTRA_TENANT_ID: ${{ vars.ENTRA_TENANT_ID }}
+      ENTRA_API_CLIENT_ID: ${{ vars.ENTRA_API_CLIENT_ID }}
+      ENTRA_SPA_CLIENT_ID: ${{ vars.ENTRA_SPA_CLIENT_ID }}
+      ENTRA_API_AUDIENCE: ${{ vars.ENTRA_API_AUDIENCE }}
+      ENTRA_API_SCOPE: ${{ vars.ENTRA_API_SCOPE || 'access_as_user' }}
+      ENTRA_USER_FLOW: ${{ vars.ENTRA_USER_FLOW || 'B2X_1_SBMRAS-SignUpSignIn' }}
+      ENTRA_GROUP_HOSPITAL_ID: ${{ vars.ENTRA_GROUP_HOSPITAL_ID }}
+      ENTRA_GROUP_BLOODBANK_ID: ${{ vars.ENTRA_GROUP_BLOODBANK_ID }}
+      ENTRA_GROUP_ADMIN_ID: ${{ vars.ENTRA_GROUP_ADMIN_ID }}
+      WEB_ORIGINS: ${{ vars.WEB_ORIGINS }}
+      BLOOD_STOCK_TTL_MINUTES: ${{ vars.BLOOD_STOCK_TTL_MINUTES || '360' }}
+      RESOURCE_TTL_MINUTES: ${{ vars.RESOURCE_TTL_MINUTES || '240' }}
+      MAX_IMPORT_ROWS: ${{ vars.MAX_IMPORT_ROWS || '500' }}
+      CREATE_KEY_VAULT: ${{ vars.CREATE_KEY_VAULT || 'false' }}
+      SQL_CONNECTION_SECRET_NAME: ${{ vars.SQL_CONNECTION_SECRET_NAME }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Check required variables
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing=()
+          for name in AZURE_RESOURCE_GROUP SQL_SERVER_NAME SQL_DATABASE_NAME SQL_ADMIN_PASSWORD SQL_MIGRATION_PASSWORD \
+                      SQL_ENTRA_ADMIN_LOGIN SQL_ENTRA_ADMIN_OBJECT_ID \
+                      ENTRA_AUTHORITY ENTRA_TENANT_ID ENTRA_API_CLIENT_ID ENTRA_SPA_CLIENT_ID; do
+            [ -n "${!name:-}" ] || missing+=("$name")
+          done
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::Set these variables/secrets on the '$TARGET_ENV' GitHub environment: ${missing[*]}"
+            exit 1
+          fi
+          [ ${#SQL_MIGRATION_PASSWORD} -ge 16 ] || { echo "::error::SQL_MIGRATION_PASSWORD must be at least 16 characters."; exit 1; }
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v3
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Ensure resource group
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$(az group exists --name "$AZURE_RESOURCE_GROUP")" != "true" ]; then
+            az group create --name "$AZURE_RESOURCE_GROUP" --location "$AZURE_LOCATION" \
+              --tags application=SBMRAS environment="$TARGET_ENV" --output none
+            echo "Created resource group $AZURE_RESOURCE_GROUP in $AZURE_LOCATION."
+          fi
+          for ns in Microsoft.Web Microsoft.Sql Microsoft.Storage Microsoft.ManagedIdentity Microsoft.Insights Microsoft.OperationalInsights Microsoft.KeyVault; do
+            state=$(az provider show --namespace "$ns" --query registrationState -o tsv 2>/dev/null || echo Unknown)
+            [ "$state" = "Registered" ] || az provider register --namespace "$ns" --wait --output none || echo "::warning::Could not register $ns."
+          done
+          # Fail fast with a clear message instead of a late Bicep error when the region has no Flex Consumption capacity.
+          rg_location=$(az group show --name "$AZURE_RESOURCE_GROUP" --query location -o tsv)
+          if ! az functionapp list-flexconsumption-locations --query "[].name" -o tsv | tr -d ' ' | tr '[:upper:]' '[:lower:]' | grep -qx "$rg_location"; then
+            echo "::error::Flex Consumption is not available in '$rg_location'. Use another region (e.g. eastasia): set AZURE_LOCATION and use a new AZURE_RESOURCE_GROUP, or delete the existing one."
+            exit 1
+          fi
+
+      - name: Stage 1 - foundation
+        id: foundation
+        shell: bash
+        run: |
+          set -euo pipefail
+          out=$(az deployment group create \
+            --name "sbmras-foundation-${GITHUB_RUN_ID}" \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --parameters "infra/foundation.${TARGET_ENV}.bicepparam" \
+            --query properties.outputs --output json)
+          echo "$out" > foundation-outputs.json
+          principal=$(jq -r '.runtimeIdentityPrincipalId.value' foundation-outputs.json)
+          {
+            echo "identity_name=$(jq -r '.runtimeIdentityName.value' foundation-outputs.json)"
+            echo "identity_client_id=$(jq -r '.runtimeIdentityClientId.value' foundation-outputs.json)"
+            echo "identity_principal_id=$principal"
+            echo "storage_id=$(jq -r '.hostStorageAccountId.value' foundation-outputs.json)"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Runtime identity storage roles
+        shell: bash
+        env:
+          PRINCIPAL_ID: ${{ steps.foundation.outputs.identity_principal_id }}
+          STORAGE_ID: ${{ steps.foundation.outputs.storage_id }}
+        run: |
+          set -euo pipefail
+          failed=()
+          while IFS=$'\t' read -r role role_id; do
+            count=$(az role assignment list --assignee "$PRINCIPAL_ID" --scope "$STORAGE_ID" --role "$role_id" --query 'length(@)' -o tsv 2>/dev/null || echo 0)
+            if [ "$count" != "0" ]; then
+              echo "$role already assigned."
+              continue
+            fi
+            if az role assignment create --assignee-object-id "$PRINCIPAL_ID" --assignee-principal-type ServicePrincipal \
+                 --role "$role_id" --scope "$STORAGE_ID" --output none 2>role-error.txt; then
+              echo "Assigned $role."
+            else
+              cat role-error.txt
+              failed+=("$role")
+            fi
+          done < <(jq -r '.requiredRoleAssignments.value[] | [.role, .roleDefinitionId] | @tsv' foundation-outputs.json)
+          if [ ${#failed[@]} -gt 0 ]; then
+            echo "::error::The deployment identity cannot assign: ${failed[*]}. An Owner must assign them to principal $PRINCIPAL_ID on $STORAGE_ID, then re-run."
+            exit 1
+          fi
+          # New data-plane role assignments can take a few minutes to propagate before the Function host uses them.
+          sleep 30
+
+      - name: Stage 2 - application resources
+        id: main
+        shell: bash
+        run: |
+          set -euo pipefail
+          az deployment group create \
+            --name "sbmras-main-${GITHUB_RUN_ID}" \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --parameters "infra/main.${TARGET_ENV}.bicepparam" \
+            --query properties.outputs --output json > main-outputs.json
+          jq -r 'to_entries[] | select(.key != "keyVaultRequiredRoleAssignments") | "\(.key)=\(.value.value)"' main-outputs.json >> "$GITHUB_OUTPUT"
+          {
+            echo "### Infrastructure ($TARGET_ENV)"
+            echo
+            echo "| Output | Value |"
+            echo "|---|---|"
+            jq -r 'to_entries[] | select(.value.value | type == "string") | "| \(.key) | `\(.value.value)` |"' main-outputs.json
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Install go-sqlcmd
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/sqlcmd"
+          curl -fsSL "https://github.com/microsoft/go-sqlcmd/releases/download/${GO_SQLCMD_VERSION}/sqlcmd-linux-amd64.tar.bz2" \
+            | tar -xj -C "$RUNNER_TEMP/sqlcmd"
+          echo "SQLCMD_PATH=$RUNNER_TEMP/sqlcmd/sqlcmd" >> "$GITHUB_ENV"
+
+      - name: Grant runtime identity and migration user
+        shell: bash
+        env:
+          SQL_FQDN: ${{ steps.main.outputs.sqlServerFqdn }}
+          SQL_SERVER: ${{ steps.main.outputs.sqlServerName }}
+          RUNTIME_IDENTITY_NAME: ${{ steps.foundation.outputs.identity_name }}
+          RUNTIME_IDENTITY_CLIENT_ID: ${{ steps.foundation.outputs.identity_client_id }}
+          FIREWALL_RULE_NAME: github-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          sql_rg="${SQL_SERVER_RESOURCE_GROUP:-$AZURE_RESOURCE_GROUP}"
+          ip=$(curl -fsS https://api.ipify.org)
+          az sql server firewall-rule create --resource-group "$sql_rg" --server "$SQL_SERVER" \
+            --name "$FIREWALL_RULE_NAME" --start-ip-address "$ip" --end-ip-address "$ip" --output none
+          trap 'az sql server firewall-rule delete --resource-group "$sql_rg" --server "$SQL_SERVER" --name "$FIREWALL_RULE_NAME" --output none || echo "::warning::Could not remove firewall rule $FIREWALL_RULE_NAME."' EXIT
+          sleep 30
+
+          run_sql() {
+            local script="$1"; shift
+            local wrapper="$RUNNER_TEMP/$(basename "$script")"
+            : > "$wrapper"
+            while [ $# -gt 0 ]; do
+              printf ':setvar %s "%s"\n' "$1" "$2" >> "$wrapper"; shift 2
+            done
+            printf 'GO\n' >> "$wrapper"
+            cat "$script" >> "$wrapper"
+            # ActiveDirectoryDefault uses the Azure CLI session from azure/login (the SQL server's Entra admin).
+            for attempt in 1 2 3; do
+              if "$SQLCMD_PATH" -S "tcp:${SQL_FQDN},1433" -d "$SQL_DATABASE_NAME" \
+                   --authentication-method ActiveDirectoryDefault -b -i "$wrapper"; then
+                rm -f "$wrapper"; return 0
+              fi
+              echo "Attempt $attempt failed (the serverless database may be resuming); retrying in 30s..."
+              sleep 30
+            done
+            rm -f "$wrapper"; return 1
+          }
+
+          run_sql SBMRAS.Infrastructure/SQL/Deployment/GrantRuntimeIdentity.sql \
+            RuntimeIdentityName "$RUNTIME_IDENTITY_NAME" RuntimeIdentityClientId "$RUNTIME_IDENTITY_CLIENT_ID"
+          run_sql SBMRAS.Infrastructure/SQL/Deployment/CreateMigrationUser.sql MigrationPassword "$SQL_MIGRATION_PASSWORD"
+          echo "Runtime identity \`$RUNTIME_IDENTITY_NAME\` can execute stored procedures; \`sbmras_migrator\` is ready." >> "$GITHUB_STEP_SUMMARY"
