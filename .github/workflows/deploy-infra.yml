@@ -126,9 +126,11 @@ jobs:
             [ "$state" = "Registered" ] || az provider register --namespace "$ns" --wait --output none || echo "::warning::Could not register $ns."
           done
           # Fail fast with a clear message instead of a late Bicep error when the region has no Flex Consumption capacity.
-          rg_location=$(az group show --name "$AZURE_RESOURCE_GROUP" --query location -o tsv)
-          if ! az functionapp list-flexconsumption-locations --query "[].name" -o tsv | tr -d ' ' | tr '[:upper:]' '[:lower:]' | grep -qx "$rg_location"; then
-            echo "::error::Flex Consumption is not available in '$rg_location'. Use another region (e.g. eastasia): set AZURE_LOCATION and use a new AZURE_RESOURCE_GROUP, or delete the existing one."
+          # Resources use AZURE_LOCATION, which may differ from the resource group's own region.
+          flex_regions=$(az functionapp list-flexconsumption-locations --query "[].name" -o tsv | tr -d ' ' | tr '[:upper:]' '[:lower:]' | sort)
+          echo "Flex Consumption regions: $(echo $flex_regions)"
+          if ! grep -qx "$AZURE_LOCATION" <<< "$flex_regions"; then
+            echo "::error::Flex Consumption is not available in '$AZURE_LOCATION'. Set the AZURE_LOCATION variable to one of the regions listed above."
             exit 1
           fi
 
