@@ -47,6 +47,14 @@ on:
         description: Optional. Display name used when the admin user is created
         type: string
         required: false
+      hospital_email:
+        description: Optional. Grant HospitalManagement + Manager of all verified hospitals to this email (apply mode only)
+        type: string
+        required: false
+      bloodbank_email:
+        description: Optional. Grant BloodBank + Manager of all verified blood banks to this email (apply mode only)
+        type: string
+        required: false
 
 permissions:
   contents: read
@@ -85,6 +93,8 @@ jobs:
       INCLUDE_DEMO_DATA: ${{ inputs.include_demo_data }}
       ADMIN_EMAIL: ${{ inputs.admin_email }}
       ADMIN_DISPLAY_NAME: ${{ inputs.admin_display_name }}
+      HOSPITAL_EMAIL: ${{ inputs.hospital_email }}
+      BLOODBANK_EMAIL: ${{ inputs.bloodbank_email }}
       SQL_SERVER_RESOURCE_GROUP: ${{ vars.SQL_SERVER_RESOURCE_GROUP || vars.AZURE_RESOURCE_GROUP || (inputs.environment == 'dev' && 'rg-sbmras-dev' || '') }}
       FIREWALL_RULE_NAME: github-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
@@ -105,10 +115,12 @@ jobs:
           if [ "$TARGET_ENV" = "prod" ] && [ "$INCLUDE_DEMO_DATA" = "true" ]; then
             fail "Demo data is not allowed in prod."
           fi
-          if [ -n "$ADMIN_EMAIL" ]; then
-            [ "$MODE" = "apply" ] || fail "admin_email is only used with mode 'apply'."
-            [[ "$ADMIN_EMAIL" =~ ^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$ ]] || fail "admin_email is not a valid email address."
-          fi
+          for pair in "admin_email:$ADMIN_EMAIL" "hospital_email:$HOSPITAL_EMAIL" "bloodbank_email:$BLOODBANK_EMAIL"; do
+            name="${pair%%:*}"; value="${pair#*:}"
+            [ -n "$value" ] || continue
+            [ "$MODE" = "apply" ] || fail "$name is only used with mode 'apply'."
+            [[ "$value" =~ ^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$ ]] || fail "$name is not a valid email address."
+          done
           if [ -n "$ADMIN_DISPLAY_NAME" ] && ! [[ "$ADMIN_DISPLAY_NAME" =~ ^[A-Za-z0-9\ .,_-]{1,100}$ ]]; then
             fail "admin_display_name may contain letters, digits, spaces and . , _ - (max 100)."
           fi
@@ -201,6 +213,27 @@ jobs:
             -SqlCmd $env:SQLCMD_PATH `
             -CodePageArgs @()
           "Admin role granted to ``$env:ADMIN_EMAIL``." >> $env:GITHUB_STEP_SUMMARY
+
+      - name: Provision hospital and blood bank users
+        if: ${{ inputs.mode == 'apply' && (inputs.hospital_email != '' || inputs.bloodbank_email != '') }}
+        shell: pwsh
+        env:
+          SQL_MIGRATION_CONNECTION_STRING: ${{ secrets.SQL_MIGRATION_CONNECTION_STRING }}
+        run: |
+          $users = @(
+            @{ Email = $env:HOSPITAL_EMAIL;  Role = 'HospitalManagement' },
+            @{ Email = $env:BLOODBANK_EMAIL; Role = 'BloodBank' }
+          ) | Where-Object { $_.Email }
+          foreach ($u in $users) {
+            ./scripts/database/Invoke-SqlScript.ps1 `
+              -ConnectionString $env:SQL_MIGRATION_CONNECTION_STRING `
+              -Path SBMRAS.Infrastructure/SQL/Deployment/ProvisionFacilityUser.sql `
+              -Variables @{ UserEmail = $u.Email; DisplayName = ($u.Email -split '@')[0]; RoleCode = $u.Role } `
+              -SqlCmd $env:SQLCMD_PATH `
+              -CodePageArgs @()
+            if ($LASTEXITCODE) { exit $LASTEXITCODE }
+            "$($u.Role) role granted to ``$($u.Email)``." >> $env:GITHUB_STEP_SUMMARY
+          }
 
       - name: Remove temporary SQL firewall rule
         if: ${{ always() && steps.sql.outputs.server_name != '' }}
