@@ -73,6 +73,20 @@ export class Login implements OnInit {
   async ngOnInit(): Promise<void> {
     await this.auth.initialize();
     this.mode.set(this.auth.mode);
+    // MSAL returns to /login after the Entra redirect; continue into the app once the session loads.
+    if (this.auth.mode === 'EntraId' && this.auth.isAuthenticated) {
+      this.busy.set(true);
+      try {
+        if (await this.session.load(true)) {
+          await this.continueToApp();
+          return;
+        }
+        this.error.set('Signed in, but your SBMRAS profile could not be loaded. Please try again.');
+      } finally {
+        this.busy.set(false);
+      }
+      return;
+    }
     if (this.auth.mode === 'DevHeader') {
       try {
         this.users.set(await this.auth.devUsers());
@@ -91,14 +105,18 @@ export class Login implements OnInit {
       if (this.auth.mode === 'DevHeader') {
         const user = await this.session.load(true);
         if (!user) throw new Error('Could not load your profile. Please try again.');
-        await this.menu.load();
-        const returnUrl = this.route.snapshot.queryParamMap.get('returnUrl');
-        await this.router.navigateByUrl(returnUrl?.startsWith('/') && !returnUrl.startsWith('//') ? returnUrl : '/dashboard');
+        await this.continueToApp();
       }
     } catch (error) {
       this.error.set(error instanceof Error ? error.message : 'Sign-in failed.');
     } finally {
       this.busy.set(false);
     }
+  }
+
+  private async continueToApp(): Promise<void> {
+    await this.menu.load();
+    const returnUrl = this.route.snapshot.queryParamMap.get('returnUrl');
+    await this.router.navigateByUrl(returnUrl?.startsWith('/') && !returnUrl.startsWith('//') ? returnUrl : '/dashboard');
   }
 }
