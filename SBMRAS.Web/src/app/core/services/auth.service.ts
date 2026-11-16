@@ -27,7 +27,9 @@ export class AuthService {
       if (this.config.mode === 'EntraId') {
         const authorityBase = this.config.authority || environment.auth.authority;
         const userFlow = this.config.userFlow || environment.auth.userFlow;
-        const authority = userFlow && !authorityBase.toLowerCase().endsWith(userFlow.toLowerCase())
+        // B2C puts the user flow in the authority path; External ID (ciamlogin.com) links the flow to the app instead.
+        const isB2c = /\.b2clogin\.com/i.test(authorityBase);
+        const authority = isB2c && userFlow && !authorityBase.toLowerCase().endsWith(userFlow.toLowerCase())
           ? `${authorityBase.replace(/\/$/, '')}/${userFlow}`
           : authorityBase;
         this.msal = new PublicClientApplication({
